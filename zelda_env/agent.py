@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import platform
+import random
 import time
 from collections import deque
 from importlib.metadata import version
@@ -138,6 +139,23 @@ class Memory:
         memory.epoch = data["epoch"]
         memory.current = memory.epochs[memory.epoch]
         return memory
+
+
+class BaselinePolicy:
+    """Stand-in for Laya with the same candidates, to measure what its choices add."""
+
+    def __init__(self, kind, seed=0):
+        self.kind = kind
+        self.rng = random.Random(seed)
+        self.model = {"id": f"baseline:{kind}", "seed": seed}
+
+    def choose(self, context, criteria):
+        # Candidates arrive ordered by route length, so the first key is the nearest one.
+        keys = list(criteria)
+        return (self.rng.choice(keys) if self.kind == "random" else keys[0]), {"baseline": self.kind}
+
+    def __call__(self, goal, observation, candidates, trace):
+        return "interact", {"baseline": self.kind}
 
 
 class Agent:
@@ -359,6 +377,9 @@ def main():
     parser.add_argument("--stall", type=int, default=20,
                         help="Decisões sem progresso na história antes de consultar o supervisor")
     parser.add_argument("--device", choices=("cpu", "mps"), default="cpu")
+    parser.add_argument("--policy", choices=("laya", "random", "shortest"), default="laya",
+                        help="Quem escolhe entre as opções novas. random e shortest são comparação")
+    parser.add_argument("--seed", type=int, default=0, help="Semente de --policy random")
     args = resolve_common(parser, parser.parse_args())
     seed = args.seed_state or paths.output_path("inicio.state")
     directory = args.directory or paths.output_path("agent")
@@ -381,12 +402,15 @@ def main():
         else:
             supervisor = Supervisor(backend, timeout=args.supervisor_timeout)
 
-    from .laya_policy import LayaPolicy
+    if args.policy == "laya":
+        from .laya_policy import LayaPolicy
 
-    try:
-        policy = LayaPolicy(args.device, "text", False)
-    except RuntimeError as error:
-        parser.exit(1, f"{error}\n")
+        try:
+            policy = LayaPolicy(args.device, "text", False)
+        except RuntimeError as error:
+            parser.exit(1, f"{error}\n")
+    else:
+        policy = BaselinePolicy(args.policy, args.seed)
 
     from pyboy import PyBoy
 
@@ -424,7 +448,7 @@ def main():
                 report = {
                     **agent.summary(), "stopped": reason, "seconds": round(time.perf_counter() - started, 1),
                     "rom_sha1": paths.AGES_SHA1, "pyboy": version("pyboy"), "python": platform.python_version(),
-                    "system": f"{platform.system()} {platform.machine()}", "laya": policy.model,
+                    "system": f"{platform.system()} {platform.machine()}", "policy": args.policy, "model": policy.model,
                     "device": args.device,
                 }
                 paths.atomic_write(directory / "summary.json",
