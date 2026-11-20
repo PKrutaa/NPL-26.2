@@ -78,7 +78,7 @@ def candidates(observation):
     return ("wait",)
 
 
-def execute(pyboy, action):
+def execute(pyboy, action, *, render=False):
     before = observe(pyboy)
     if action not in candidates(before):
         raise ValueError(f"Ação indisponível em {before.mode}: {action}")
@@ -87,7 +87,7 @@ def execute(pyboy, action):
 
     def tick():
         nonlocal frames
-        if not pyboy.tick(1, render=False):
+        if not pyboy.tick(1, render=render):
             raise InterruptedError("Janela do emulador encerrada")
         frames += 1
         return observe(pyboy)
@@ -122,7 +122,7 @@ def execute(pyboy, action):
     return after, event, frames
 
 
-def show_status(pyboy):
+def show_status(pyboy, prefix="Ages"):
     """Update the title of the focused SDL window in this process."""
     from sdl2 import SDL_GetKeyboardFocus, SDL_SetWindowTitle
 
@@ -130,7 +130,7 @@ def show_status(pyboy):
     if not window:
         return
     obs = observe(pyboy)
-    title = f"Ages | frame {pyboy.frame_count} | {obs.mode}"
+    title = f"{prefix} | frame {pyboy.frame_count} | {obs.mode}"
     if obs.room is not None:
         title += f" | {obs.room} | XY {obs.x},{obs.y} | {obs.facing or '?'}"
     if pyboy.paused:

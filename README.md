@@ -144,6 +144,12 @@ HF_HUB_OFFLINE=1 .venv/bin/python -m zelda_env.benchmark run --policy laya \
   --format json --history --output output/benchmark/laya-json-history.json
 ```
 
+Para assistir ao Laya jogar em loop numa janela local do PyBoy, rode o comando abaixo. Adicione `--scenario approach`, `--scenario dialogue` ou `--scenario exit` para repetir só um cenário. Pressione Escape na janela para parar.
+
+```bash
+HF_HUB_OFFLINE=1 .venv/bin/python -m zelda_env.benchmark run --policy laya --watch
+```
+
 O PyBoy aguarda enquanto a política escolhe. Cada execução registra resultado, decisões, frames, bloqueios e latência em `output/benchmark/`. As execuções isolam o save de cartucho em memória. Veja os [resultados e limites da avaliação](docs/validation-adapter.md).
 
 ## Estrutura

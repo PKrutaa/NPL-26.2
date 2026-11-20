@@ -10,11 +10,11 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .__main__ import DEFAULT_ROM, ROOT, rom_path
-from .adapter import candidates, execute, observe
+from .adapter import candidates, execute, observe, show_status
 from .scenarios import SCENARIOS, achieved, prepare
 
 
-def evaluate(pyboy, name, policy, seed, choose_laya=None):
+def evaluate(pyboy, name, policy, seed, choose_laya=None, *, watch=False):
     scenario = SCENARIOS[name]
     rng = random.Random(seed)
     obs = observe(pyboy)
@@ -40,7 +40,13 @@ def evaluate(pyboy, name, policy, seed, choose_laya=None):
             action, details = choose_laya(scenario.goal, obs, choices, trace)
         latency = (time.perf_counter() - start) * 1000
         before = obs
-        obs, event, frames = execute(pyboy, action)
+        if watch:
+            show_status(pyboy, f"Laya | {name} | {action}")
+        obs, event, frames = execute(pyboy, action, render=watch)
+        if watch:
+            print(f"{name} {step + 1}/{scenario.budget}: {action} → {event}", flush=True)
+            show_status(pyboy, f"Laya | {name} | {action}: {event}")
+            time.sleep(0.35)
         if event == "dialogue_opened":
             talking_to_monkey = action == "interact" and achieved("approach", before)
         elif event == "dialogue_advanced":
@@ -66,6 +72,22 @@ def evaluate(pyboy, name, policy, seed, choose_laya=None):
     }
 
 
+def watch_scenarios(pyboy, checkpoints, policy, seed):
+    # Display successful tasks first when looping over the three scenarios.
+    while True:
+        for name in ("approach", "dialogue", "exit"):
+            if name not in checkpoints:
+                continue
+            pyboy.load_state(io.BytesIO(checkpoints[name]))
+            run = evaluate(pyboy, name, "laya", seed, policy, watch=True)
+            result = "concluído" if run["success"] else "limite de decisões"
+            print(f"{name}: {result}", flush=True)
+            # Keep showing the final frame briefly. SDL events are handled by
+            # the next tick and the next episode restores its own checkpoint.
+            show_status(pyboy, f"Laya | {name} | {result}")
+            time.sleep(1.4)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("prepare", "run"))
@@ -80,14 +102,21 @@ def main():
     parser.add_argument("--history", action="store_true")
     parser.add_argument("--device", choices=("cpu", "mps"), default="cpu")
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--watch", action="store_true", help="Exibe e repete os episódios do Laya na janela SDL2")
     args = parser.parse_args()
     if args.trials < 1 or (args.trials != 1 and args.policy != "random"):
         parser.error("--trials deve ser positivo e só pode variar para random")
 
+    if args.watch and (args.command != "run" or args.policy != "laya"):
+        parser.error("--watch requer run --policy laya")
+
     from pyboy import PyBoy
 
-    pyboy = PyBoy(str(args.rom), window="null", ram_file=io.BytesIO(bytes(8192)), sound_volume=0)
-    pyboy.set_emulation_speed(0)
+    pyboy = PyBoy(
+        str(args.rom), window="SDL2" if args.watch else "null",
+        ram_file=io.BytesIO(bytes(8192)), sound_volume=0,
+    )
+    pyboy.set_emulation_speed(1 if args.watch else 0)
     try:
         if args.command == "prepare":
             with args.checkpoint.open("rb") as file:
@@ -104,6 +133,11 @@ def main():
             from .laya_policy import LayaPolicy
 
             choose_laya = LayaPolicy(args.device, args.format, args.history)
+
+        if args.watch:
+            print("Laya jogando em loop. Escape fecha a janela.", flush=True)
+            watch_scenarios(pyboy, checkpoints, choose_laya, args.seed)
+            return
 
         runs = []
         for name, checkpoint in checkpoints.items():
@@ -124,6 +158,9 @@ def main():
         }
         output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
         print(f"Relatório salvo em {output}")
+    except (InterruptedError, KeyboardInterrupt):
+        if not args.watch:
+            raise
     except (OSError, ValueError, RuntimeError) as error:
         parser.exit(1, f"{error}\n")
     finally:
