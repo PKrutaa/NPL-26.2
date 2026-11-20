@@ -80,9 +80,11 @@ def candidates(observation):
 
 def execute(pyboy, action, *, render=False, hold_frames=12):
     before = observe(pyboy)
-    if action not in candidates(before):
+    use_item = action == "use_b" and before.mode == "playing"
+    if not use_item and action not in candidates(before):
         raise ValueError(f"Ação indisponível em {before.mode}: {action}")
-    key = {"interact": "a", "cancel": "b", "wait": None}.get(action, action)
+    key = {"interact": "a", "cancel": "b", "use_b": "b", "wait": None}.get(action, action)
+    terrain_before = room_layout(pyboy) if use_item else None
     frames = 0
 
     def tick():
@@ -103,6 +105,11 @@ def execute(pyboy, action, *, render=False, hold_frames=12):
         if key:
             pyboy.button_release(key)
     after = tick()
+    if use_item:
+        for _ in range(18):
+            if after.mode != "playing" or after.room != before.room:
+                break
+            after = tick()
     while after.mode == "transition" and frames < 120:
         after = tick()
     if after.mode == "transition":
@@ -115,11 +122,17 @@ def execute(pyboy, action, *, render=False, hold_frames=12):
         event = "dialogue_closed"
     elif before.dialogue_has_next_page and not after.dialogue_ready and key in ("a", "b"):
         event = "dialogue_advanced"
+    elif use_item and room_layout(pyboy) != terrain_before:
+        event = "terrain_changed"
     elif action in DIRECTIONS and after.mode == "playing":
         event = "moved" if (before.x, before.y) != (after.x, after.y) else "blocked"
     else:
         event = "no_change"
     return after, event, frames
+
+
+def room_layout(pyboy):
+    return bytes(pyboy.memory[0xCF00:0xCFC0])
 
 
 def show_status(pyboy, prefix="Ages"):

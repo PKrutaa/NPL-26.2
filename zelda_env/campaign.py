@@ -36,8 +36,8 @@ class Campaign:
             show_status(self.pyboy, f"Campanha | {action} | {event}")
         return after
 
-    def go(self, goal):
-        route = self.navigator.path(self.pyboy, goal)
+    def go(self, goal, **search_options):
+        route = self.navigator.path(self.pyboy, goal, **search_options)
         for action in route:
             self.act(action)
         if not goal(observe(self.pyboy)):
@@ -93,6 +93,14 @@ class Campaign:
         if not self.flag(TREASURE_FLAGS, WOODEN_SWORD):
             raise RuntimeError("Introdução concluída sem a espada esperada no jogo não vinculado")
 
+    def leave_forest(self):
+        for room in ("00:49", "00:59", "00:69"):
+            self.room(room)
+
+    def reach_lynna_city(self):
+        self.go(lambda obs: obs.room == "00:68",
+                toward=lambda obs: (obs.x + abs(obs.y - 71)) / 12, cut_bushes=True)
+
     def meet_impa(self):
         self.room("00:7a")
         self.go(lambda obs: obs.room == "00:7a" and obs.mode == "playing" and obs.y <= 10)
@@ -121,6 +129,8 @@ STAGES = (
     ("04-caminho-da-floresta", partial(Campaign.room, room="00:49")),
     ("05-clareira", partial(Campaign.room, room="00:39")),
     ("06-nayru", Campaign.clear_nayru_scene),
+    ("07-saida-da-floresta", Campaign.leave_forest),
+    ("08-lynna-city", Campaign.reach_lynna_city),
 )
 
 

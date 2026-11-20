@@ -1,9 +1,10 @@
 """Check short controller actions in a headless copy of the current state."""
 
-from collections import deque
+from heapq import heappop, heappush
+from itertools import count
 from io import BytesIO
 
-from .adapter import DIRECTIONS, candidates, execute, observe
+from .adapter import DIRECTIONS, candidates, execute, observe, room_layout
 
 
 class Lookahead:
@@ -34,7 +35,7 @@ class Lookahead:
     def close(self):
         self.shadow.stop(save=False)
 
-    def path(self, pyboy, destination, *, limit=600, interaction=None):
+    def path(self, pyboy, destination, *, limit=600, interaction=None, toward=None, across_rooms=False, cut_bushes=False):
         """Search legal controller inputs until a checkpoint predicate holds."""
         def capture(emulator):
             stream = BytesIO()
@@ -45,24 +46,37 @@ class Lookahead:
         if initial.mode != "playing":
             raise RuntimeError(f"Navegação indisponível em {initial.mode}")
 
-        def location(obs):
-            return obs.x // 4, obs.y // 4, obs.facing if interaction else None
+        def location(obs, emulator):
+            scale = 8 if across_rooms else 4
+            facing = obs.facing if interaction or cut_bushes else None
+            terrain = room_layout(emulator) if cut_bushes else None
+            return obs.room, obs.x // scale, obs.y // scale, facing, terrain
 
-        pending = deque([(capture(pyboy), ())])
+        sequence = count()
+        pending = []
+
+        def enqueue(obs, state, route):
+            priority = len(route) + (toward(obs) if toward else 0)
+            heappush(pending, (priority, next(sequence), state, route))
+
+        enqueue(initial, capture(pyboy), ())
 
         if destination(initial):
             return ()
-        visited = {location(initial)}
+        visited = {location(initial, pyboy)}
         expanded = 0
         while pending and expanded < limit:
-            state, route = pending.popleft()
+            _, _, state, route = heappop(pending)
             self.shadow.load_state(BytesIO(state))
             before = observe(self.shadow)
             expanded += 1
-            actions = (*DIRECTIONS, "interact") if interaction else DIRECTIONS
+            actions = candidates(before)
+            actions = tuple(action for action in actions if action in DIRECTIONS or (
+                action == "interact" and interaction
+            ))
+            if cut_bushes and can_cut_bush(self.shadow, before):
+                actions += ("use_b",)
             for direction in actions:
-                if direction not in candidates(before):
-                    continue
                 self.shadow.load_state(BytesIO(state))
                 after, event, _ = execute(self.shadow, direction)
                 candidate = (*route, direction)
@@ -70,12 +84,45 @@ class Lookahead:
                     interaction and direction == "interact" and interaction(self.shadow, after)
                 ):
                     return candidate
-                if after.mode != "playing" or after.room != initial.room:
+                if after.mode != "playing" or (not across_rooms and after.room != initial.room):
                     continue
-                if event != "moved" and not (interaction and before.facing != after.facing):
+                if event not in ("moved", "room_changed", "terrain_changed") and not (
+                    (interaction or cut_bushes) and before.facing != after.facing
+                ):
                     continue
-                key = location(after)
+                key = location(after, self.shadow)
                 if key not in visited:
                     visited.add(key)
-                    pending.append((capture(self.shadow), candidate))
+                    enqueue(after, capture(self.shadow), candidate)
         raise RuntimeError(f"A busca não encontrou rota após {expanded} estados")
+
+
+    def overland(self, pyboy, room, *, limit=2500, cut_bushes=False):
+        group, index = room.split(":")
+        index = int(index, 16)
+
+        def distance(obs):
+            current_group, current = obs.room.split(":")
+            if current_group != group:
+                return 100
+            current = int(current, 16)
+            dx = (current % 16 - index % 16) * 160 + obs.x - 80
+            dy = (current // 16 - index // 16) * 128 + obs.y - 64
+            return (abs(dx) + abs(dy)) / 12
+
+        return self.path(pyboy, lambda obs: obs.room == room, limit=limit, toward=distance,
+                         across_rooms=True, cut_bushes=cut_bushes)
+
+
+def can_cut_bush(pyboy, observation):
+    if observation.mode != "playing" or pyboy.memory[0xC688] != 5 or not observation.facing:
+        return False
+    delta = {"up": (0, -1), "right": (1, 0), "down": (0, 1), "left": (-1, 0)}
+    dx, dy = delta[observation.facing]
+    layout = room_layout(pyboy)
+    for distance in (4, 8, 12, 16):
+        x = (observation.x + dx * distance) // 16
+        y = (observation.y + dy * distance) // 16
+        if 0 <= x < 10 and 0 <= y < 8 and layout[y * 16 + x] == 0xC5:
+            return True
+    return False
