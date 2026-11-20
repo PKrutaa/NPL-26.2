@@ -32,7 +32,7 @@ TALKS_PER_CHARACTER = 3
 TOOL_USES_PER_AREA = 10
 MAX_HOPS = 14  # consecutive trips to a pending area with nothing new found
 SURVEY_LEVELS = (
-    {"grid": 16, "stride": 16, "limit": 400},
+    {"grid": 16, "stride": 16, "limit": 400, "pushes": False},
     {"grid": 8, "stride": 12, "limit": 700},
     {"grid": 4, "stride": 12, "limit": 1500},
 )
@@ -404,8 +404,9 @@ class Agent:
         def brief(option):
             text = option.short or option.description
             # An exit to a room not seen in this story state says so: goals can ask for it.
+            # Leaving for the overworld is never "a new room" of the place Link is exploring.
             fresh_room = option.kind == "exit" and option.destination not in seen
-            return f"{text} to a new room" if fresh_room and text.startswith("Go ") else text
+            return f"{text} to a new room" if fresh_room and text.startswith("Go ") and text != "Go outside" else text
 
         criteria = {key: brief(option) for key, option in keys.items()}
         # Laya follows one direction far better than two. Name the first that has an exit.

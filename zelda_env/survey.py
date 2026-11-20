@@ -224,7 +224,7 @@ class Surveyor:
                 execute(self.shadow, step[0], hold_frames=step[1])
         return None
 
-    def options(self, pyboy, *, grid=8, limit=700, tolerance=0, stride=12):
+    def options(self, pyboy, *, grid=8, limit=700, tolerance=0, stride=12, pushes=True):
         """Flood the room with short moves. Return one Option per distinct outcome."""
         start = observe(pyboy)
         if start.mode != "playing":
@@ -459,6 +459,8 @@ class Surveyor:
                         continue
                     add(name, "interact", text, full, short=brief)
                     break
+                if not pushes:
+                    continue  # the push probe is the slowest; the quick pass leaves it out
                 if f"push:{target}:{direction}" in found or push_tries.get((target, direction), 0) >= 2:
                     continue  # known, or tried from two standing spots already
                 push_tries[(target, direction)] = push_tries.get((target, direction), 0) + 1
@@ -477,10 +479,12 @@ class Surveyor:
                         self._load(blocked)
                         probe = (*nudge, (direction, hold), ("wait", 30))
                         pushed, _ = run_route(self.shadow, probe)
-                        if self._hurt_after(health - tolerance):
+                        if self.shadow.memory[HEALTH] < health - tolerance:
                             break
                         if not self._pushed(entity, pushed, base_progress, base_layout):
                             continue
+                        if self._hurt_after(health - tolerance):
+                            break  # it moved, but Link then walked into a pit
                         # Rule out things that happen anyway, such as a character walking by.
                         self._load(blocked)
                         idle, _ = run_route(self.shadow, (("wait", hold), ("wait", 30)))
