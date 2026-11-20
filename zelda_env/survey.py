@@ -378,19 +378,24 @@ class Surveyor:
                     break
                 if f"push:{target}:{direction}" in found:
                     continue  # already known; alignment matters, so keep probing until then
-                self._load(blocked)
-                probe = ((direction, 60), ("wait", 30))
-                pushed, _ = run_route(self.shadow, probe)
-                # Holding a direction can walk Link into a pit or into water.
-                hurt = self._hurt_after(health - tolerance)
-                if not hurt and self._effect(entity, pushed, base_progress, base_layout):
+                # Hold only as long as needed: after the object moves, Link keeps walking,
+                # and the next tile may be a pit.
+                for hold in (32, 44, 60):
+                    self._load(blocked)
+                    probe = ((direction, hold), ("wait", 30))
+                    pushed, _ = run_route(self.shadow, probe)
+                    if self._hurt_after(health - tolerance):
+                        break
+                    if not self._effect(entity, pushed, base_progress, base_layout):
+                        continue
                     # Rule out things that happen anyway, such as a character walking by.
                     self._load(blocked)
-                    idle, _ = run_route(self.shadow, (("wait", 60), ("wait", 30)))
+                    idle, _ = run_route(self.shadow, (("wait", hold), ("wait", 30)))
                     if not self._effect(entity, idle, base_progress, base_layout):
                         add(f"push:{target}:{direction}", "push",
                             f"Push the object {where} toward the {COMPASS[direction]}", (*step, *probe),
                             short="Push the object")
+                    break
             if route and not responded:
                 # Controls that stop answering right after a walk mean a scene is about to start.
                 linger(state, route, here)
