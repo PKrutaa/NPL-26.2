@@ -28,6 +28,7 @@ GLOBAL_FLAGS = 0xC6D0
 TREASURES = 0xC69A
 TEXT_DISPLAY_STATE = (7, 0xD0C0)
 MEMORY_FORMAT = 4
+TALKS_PER_CHARACTER = 3
 SURVEY_LEVELS = (
     {"grid": 16, "stride": 16, "limit": 400},
     {"grid": 8, "stride": 12, "limit": 700},
@@ -72,9 +73,11 @@ def heading(room, target):
         return None
     here, there = int(room[3:], 16), int(target[3:], 16)
     dy, dx = there // 16 - here // 16, there % 16 - here % 16
-    words = [word for word in ("north" if dy < 0 else "south" if dy > 0 else "",
-                               "west" if dx < 0 else "east" if dx > 0 else "") if word]
-    return " or ".join(words)
+    vertical = "north" if dy < 0 else "south" if dy > 0 else ""
+    horizontal = "west" if dx < 0 else "east" if dx > 0 else ""
+    # The longer leg first: the goal names one direction, and this is the order to try.
+    words = [vertical, horizontal] if abs(dy) >= abs(dx) else [horizontal, vertical]
+    return " or ".join(word for word in words if word)
 
 
 def node_of(room, options):
@@ -113,8 +116,16 @@ class Memory:
 
     def fresh(self, node, options):
         """Options worth trying now: not dropped and not tried here in this story state."""
+        def chatty(option):
+            # Some characters cycle through many lines. Three talks each are enough.
+            if not option.id.startswith("interact:slot"):
+                return False
+            prefix = f"{node}|{option.id.split(':a:')[0].split(':b:')[0]}:"
+            return sum(key.startswith(prefix) for key in self.current["tried"]) >= TALKS_PER_CHARACTER
+
         return [option for option in options
-                if (node, option.id) not in self.banned and not self.tries(node, option.id)]
+                if (node, option.id) not in self.banned and not self.tries(node, option.id)
+                and not chatty(option)]
 
     def arrive(self, node, options, origin=None, via=None):
         """Record the area Link is in, and how he got here."""
@@ -310,7 +321,13 @@ class Agent:
             fresh_room = option.kind == "exit" and option.destination not in seen
             return f"{text} to a new room" if fresh_room and text.startswith("Go ") else text
 
-        key, laya = self.policy.choose({"goal": hint}, {key: brief(option) for key, option in keys.items()})
+        criteria = {key: brief(option) for key, option in keys.items()}
+        # Laya follows one direction far better than two. Name the first that has an exit.
+        if " or " in hint and hint.startswith("Go "):
+            wanted = hint[3:-1].split(" or ")
+            offered = [way for way in wanted if any(text.startswith(f"Go {way}") for text in criteria.values())]
+            hint = f"Go {(offered or wanted)[0]}."
+        key, laya = self.policy.choose({"goal": hint}, criteria)
         # The origin names who chose, so a comparison run is never attributed to Laya.
         return keys[key], getattr(self, "label", "laya"), {**details, "laya": laya}
 

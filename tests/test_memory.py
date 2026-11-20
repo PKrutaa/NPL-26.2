@@ -103,3 +103,16 @@ def test_exploration_of_a_random_world_terminates_without_repeats():
         assert all(f"{node_of(name, world[name])}|interact:{name}:text" in tried for name in rooms)
         assert max(count for key, count in tried.items() if "interact" in key) == 1
         assert steps < 200
+
+
+def test_a_character_with_many_lines_is_talked_to_three_times():
+    memory = Memory()
+    lines = [Option(f"interact:slot4:a:text{index}", "interact", "talk", ()) for index in range(6)]
+    node = node_of("A", lines)
+    memory.arrive(node, lines)
+    for option in lines[:3]:
+        memory.record(node, option.id)
+    assert memory.fresh(node, lines) == []
+    # Another character in the same place is unaffected.
+    other = Option("interact:slot5:a:text0", "interact", "talk", ())
+    assert memory.fresh(node, [*lines, other]) == [other]

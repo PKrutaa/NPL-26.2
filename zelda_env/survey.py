@@ -30,6 +30,7 @@ COLLISIONS = 0xCE00  # same 16-byte row stride as the layout
 INVENTORY_B, INVENTORY_A = 0xC688, 0xC689
 SWORD = 0x05
 HEART = 4  # health is counted in quarter hearts
+TOOL_OPTIONS = 4
 # (frames per step, reach in pixels, steps to back away after a swing, style, detour side)
 # "chase" walks to the enemy and steps around what blocks the way. "ambush" stands still,
 # turns toward the enemy and swings when it comes close: it suits enemies that fly in.
@@ -387,4 +388,10 @@ class Surveyor:
             if route and not responded:
                 # Controls that stop answering right after a walk mean a scene is about to start.
                 linger(state, route, here)
+        # Tools can act on many tiles of a room. Keep the nearest few, so they do not
+        # crowd out the rest. The others show up again after these are used.
+        tool_uses = sorted((option for option in found.values() if option.short and option.short.startswith(
+            "Use the item")), key=lambda option: len(option.route))
+        for option in tool_uses[TOOL_OPTIONS:]:
+            del found[option.id]
         return list(found.values())

@@ -114,6 +114,7 @@ def test_heading_gives_compass_words_between_overworld_screens():
     from zelda_env.agent import heading
 
     assert heading("00:8a", "00:39") == "north or west"
+    assert heading("00:8a", "00:71") == "west or north"
     assert heading("00:68", "00:48") == "north"
     assert heading("00:38", "00:39") == "east"
     # No direction across maps (indoors, dungeons) or once the landmark is reached.
@@ -140,7 +141,21 @@ def test_goal_follows_the_steps_of_the_objective():
     made.pyboy = SimpleNamespace(memory={address: 0 for address in range(0xC600, 0xCA00)})
     made.pyboy.memory[0xC6D0 + 1] = 0x04  # sword received: global flag 0x0a
     assert made.objective("00:39") == ("maku-tree", "Go south or west.")
+    assert made.objective("00:59") == ("maku-tree", "Go south or west.")
     assert made.objective("00:68") == ("maku-tree", "Go north.")  # waypoint passed on arrival
     assert made.objective("00:48") == ("maku-tree", "Enter the door or stairs.")
     assert made.objective("04:04") == ("maku-tree", "Go north.")  # inside the Maku Path
     assert made.objective("00:38") == ("maku-tree", "Talk to the character.")
+
+
+def test_goal_names_one_direction_that_has_an_exit():
+    made = agent()
+    options = [Option("exit:B", "exit", "west", (), "B", "Go west"),
+               Option("exit:C", "exit", "south", (), "C", "Go south")]
+    node = node_of("A", options)
+    made.memory.arrive(node, options)
+    captured = []
+    made.policy.choose = lambda context, criteria: (captured.append(context["goal"]) or sorted(criteria)[0], {})
+    made.decide(OBS, node, options, "Go north or west.")
+    made.decide(OBS, node, options, "Go north or east.")
+    assert captured == ["Go west.", "Go north."]
