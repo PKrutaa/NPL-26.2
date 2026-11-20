@@ -30,6 +30,7 @@ TEXT_DISPLAY_STATE = (7, 0xD0C0)
 MEMORY_FORMAT = 6
 TALKS_PER_CHARACTER = 3
 TOOL_USES_PER_AREA = 10
+GOAL_REUSES = 2  # times a known exit toward the goal is offered again per story state
 MAX_HOPS = 14  # consecutive trips to a pending area with nothing new found
 SURVEY_LEVELS = (
     {"grid": 16, "stride": 16, "limit": 400, "pushes": False},
@@ -114,7 +115,7 @@ class Memory:
             # identified by their outcome, so the ones already done stay done.
             kept = {name: count for name, count in (self.current["tried"] if self.epochs else {}).items()
                     if not name.split("|", 1)[1].startswith("exit:")}
-            self.epochs[key] = {"tried": kept, "visited": [], "pending": {}, "depth": {}}
+            self.epochs[key] = {"tried": kept, "visited": [], "pending": {}, "depth": {}, "reused": {}}
         self.current = self.epochs[key]
         return changed
 
@@ -365,6 +366,34 @@ class Agent:
         """Return (option, origin, details). The candidate set is what prevents loops."""
         usable = [option for option in options if (room, option.id) not in self.memory.banned]
         fresh = self.memory.fresh(room, options)
+        seen = {name.split("@")[0] for name in self.memory.current["visited"]}
+
+        def brief(option):
+            text = option.short or option.description
+            # An exit to a room not seen in this story state says so: goals can ask for it.
+            # Leaving for the overworld is never "a new room" of the place Link is exploring.
+            fresh_room = option.kind == "exit" and option.destination not in seen
+            return f"{text} to a new room" if fresh_room and text.startswith("Go ") and text != "Go outside" else text
+
+        def toward(option, goal):
+            text = brief(option)
+            return text == goal or text.startswith(f"{goal} ")
+
+        # A known exit that points at the goal can be used again, a limited number of
+        # times per story state. Without this, Link could not walk back the way he came.
+        reused = self.memory.current.setdefault("reused", {})
+        ways = [option for option in usable if option.kind == "exit" and option not in fresh
+                and reused.get(f"{room}|{option.id}", 0) < GOAL_REUSES]
+        if hint.startswith("Go "):
+            wanted = hint[3:-1].split(" or ")
+            if len(wanted) > 1:
+                # Laya follows one direction far better than two. Name the first that has an
+                # exit. With no exit either way, the way there goes around: explore instead.
+                offered = [way for way in wanted if any(toward(option, f"Go {way}") for option in [*fresh, *ways])]
+                hint = f"Go {offered[0]}." if offered else "Go to a new room."
+            goal = hint[:-1]
+            if not any(toward(option, goal) for option in fresh):
+                fresh = [*fresh, *(option for option in ways if toward(option, goal))]
         impasse = not fresh
         if not impasse:
             self.hops = 0
@@ -381,43 +410,31 @@ class Agent:
         candidates = sorted(fresh or usable, key=lambda option: len(option.route))[:12]
         if not candidates:
             return None, "none", {}
+
+        def chosen(option, origin, details):
+            if self.memory.tries(room, option.id) and option.kind == "exit":
+                reused[f"{room}|{option.id}"] = reused.get(f"{room}|{option.id}", 0) + 1
+            return option, origin, details
+
         context = self.context(obs, hint)
+        details = {}
         if self.supervisor and len(candidates) > 1 and (impasse or self.since_progress >= self.stall):
             annotated = [(option.id, option.description + (
                 "" if not self.memory.tries(room, option.id) else " (already tried)")) for option in candidates]
-            choice, record = self.supervisor.consult(context, annotated, self.decisions)
+            choice, details = self.supervisor.consult(context, annotated, self.decisions)
             if choice:
-                return next(option for option in candidates if option.id == choice), "supervisor", record
-            details = record
-        else:
-            details = {}
+                return chosen(next(option for option in candidates if option.id == choice), "supervisor", details)
         if impasse:
             # Nothing new anywhere known: least-tried first, so repeats rotate instead of sticking.
             option = min(candidates, key=lambda option: (self.memory.tries(room, option.id), len(option.route)))
             return option, "fallback", details
         if len(candidates) == 1:
-            return candidates[0], "forced", details
+            return chosen(candidates[0], "forced", details)
         keys = {f"option_{index + 1}": option for index, option in enumerate(candidates)}
         # Laya matches short text well and long text at chance, so it gets only the goal.
-        seen = {name.split("@")[0] for name in self.memory.current["visited"]}
-
-        def brief(option):
-            text = option.short or option.description
-            # An exit to a room not seen in this story state says so: goals can ask for it.
-            # Leaving for the overworld is never "a new room" of the place Link is exploring.
-            fresh_room = option.kind == "exit" and option.destination not in seen
-            return f"{text} to a new room" if fresh_room and text.startswith("Go ") and text != "Go outside" else text
-
-        criteria = {key: brief(option) for key, option in keys.items()}
-        # Laya follows one direction far better than two. Name the first that has an exit.
-        if " or " in hint and hint.startswith("Go "):
-            wanted = hint[3:-1].split(" or ")
-            offered = [way for way in wanted if any(text.startswith(f"Go {way}") for text in criteria.values())]
-            # With no exit either way, the way there goes around: explore instead.
-            hint = f"Go {offered[0]}." if offered else "Go to a new room."
-        key, laya = self.policy.choose({"goal": hint}, criteria)
+        key, laya = self.policy.choose({"goal": hint}, {key: brief(option) for key, option in keys.items()})
         # The origin names who chose, so a comparison run is never attributed to Laya.
-        return keys[key], getattr(self, "label", "laya"), {**details, "laya": laya}
+        return chosen(keys[key], getattr(self, "label", "laya"), {**details, "laya": laya})
 
     def step(self):
         """One decision. Returns False when there is nothing left to try."""

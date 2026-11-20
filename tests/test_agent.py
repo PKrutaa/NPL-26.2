@@ -177,3 +177,21 @@ def test_endless_trips_to_a_pending_area_are_cut_off():
         made.memory.record(node, chosen.id)
         origins.append(origin)
     assert origins[:14] == ["frontier"] * 14 and set(origins[14:]) == {"fallback"}
+
+
+def test_a_known_exit_toward_the_goal_is_offered_again_a_limited_number_of_times():
+    made = agent()
+    options = [Option("exit:01:76", "exit", "door", (), "01:76", "Go outside"), option("talk:1"), option("talk:2")]
+    node = node_of("04:e7", options)
+    made.memory.arrive(node, options)
+    made.memory.record(node, "exit:01:76")  # Link came in through it, so it is not new
+    offered = []
+    made.policy.choose = lambda context, criteria: (
+        offered.append(set(criteria.values())) or next(k for k, v in criteria.items() if v == "Go outside"), {})
+    for _ in range(2):
+        chosen, origin, _ = made.decide(OBS, node, options, "Go outside.")
+        assert (chosen.id, origin) == ("exit:01:76", "laya")
+    made.decide(OBS, node, options, "Go to a new room.")
+    made.policy.choose = lambda context, criteria: (offered.append(set(criteria.values())) or sorted(criteria)[0], {})
+    made.decide(OBS, node, options, "Go outside.")
+    assert "Go outside" in offered[0] and "Go outside" not in offered[2] and "Go outside" not in offered[3]
