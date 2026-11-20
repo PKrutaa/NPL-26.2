@@ -28,6 +28,11 @@ GLOBAL_FLAGS = 0xC6D0
 TREASURES = 0xC69A
 TEXT_DISPLAY_STATE = (7, 0xD0C0)
 MEMORY_FORMAT = 2
+SURVEY_LEVELS = (
+    {"grid": 16, "stride": 16, "limit": 400},
+    {"grid": 8, "stride": 12, "limit": 700},
+    {"grid": 4, "stride": 12, "limit": 1500},
+)
 
 
 def _flag(base, index):
@@ -77,7 +82,7 @@ class Memory:
             # identified by their outcome, so the ones already done stay done.
             kept = {name: count for name, count in (self.current["tried"] if self.epochs else {}).items()
                     if not name.split("|", 1)[1].startswith("exit:")}
-            self.epochs[key] = {"tried": kept, "visited": [], "pending": {}, "fine": []}
+            self.epochs[key] = {"tried": kept, "visited": [], "pending": {}, "depth": {}}
         self.current = self.epochs[key]
         return changed
 
@@ -178,6 +183,7 @@ class Agent:
         self.deaths = 0
         self.empty = 0
         self.scenes = 0
+        self.damage = 0
         self.arrival = (None, None)  # (node left, option taken) for the last decision
         self.done = [name for name, _, reached in OBJECTIVES if reached(pyboy)]
 
@@ -221,6 +227,7 @@ class Agent:
             "link position": f"x={obs.x} y={obs.y} facing {obs.facing}",
             "rooms visited since last progress": len(self.memory.current["visited"]),
             "decisions since last progress": self.since_progress,
+            "health": f"{self.pyboy.memory[HEALTH] / 4:g} of {self.pyboy.memory[HEALTH + 1] / 4:g} hearts",
             "recent": "; ".join(self.recent) or "nothing yet",
         }
 
@@ -254,7 +261,8 @@ class Agent:
             return candidates[0], "forced", details
         keys = {f"option_{index + 1}": option for index, option in enumerate(candidates)}
         key, laya = self.policy.choose(context, {key: option.description for key, option in keys.items()})
-        return keys[key], "laya", {**details, "laya": laya}
+        # The origin names who chose, so a comparison run is never attributed to Laya.
+        return keys[key], getattr(self, "label", "laya"), {**details, "laya": laya}
 
     def step(self):
         """One decision. Returns False when there is nothing left to try."""
@@ -269,13 +277,21 @@ class Agent:
                 self.supervisor.progressed()
         name, hint = self.objective()
         started = time.perf_counter()
-        options = self.surveyor.options(self.pyboy)
+        # A quick pass on 16-pixel steps first. The slower passes run only when the area
+        # has nothing new, or still owes an option that only they can route to.
+        options = self.surveyor.options(self.pyboy, **SURVEY_LEVELS[0])
         node = node_of(obs.room, options)
-        if not self.memory.fresh(node, options) and node not in self.memory.current["fine"]:
-            # Once per area: a finer grid finds narrow gaps the first pass can miss.
-            self.memory.current["fine"].append(node)
-            options = self.surveyor.options(self.pyboy, grid=4, limit=1500) or options
-            node = node_of(obs.room, options)
+        depth = self.memory.current.setdefault("depth", {})
+        level = 0
+        while level < len(SURVEY_LEVELS) - 1 and not self.memory.fresh(node, options):
+            found = {option.id for option in options}
+            owed = [item for item in self.memory.current["pending"].get(node, []) if item not in found]
+            if depth.get(node, 0) > level and not owed:
+                break  # the deeper passes already ran here and left nothing to do
+            level += 1
+            depth[node] = max(depth.get(node, 0), level)
+            options += [option for option in self.surveyor.options(self.pyboy, **SURVEY_LEVELS[level])
+                        if option.id not in found]
         survey_seconds = time.perf_counter() - started
         # A scene that continues by itself is not a choice. Let it play and look again.
         scene = next((option for option in self.memory.fresh(node, options)
@@ -324,10 +340,14 @@ class Agent:
             outcome = "failed, option dropped"
         elif progress(self.pyboy) != story:
             outcome = "story progressed"
+        elif option.kind == "fight":
+            outcome = "enemy defeated"
         elif after.room != obs.room:
             outcome = f"moved to room {after.room}"
-        elif self.pyboy.memory[HEALTH] < health:
-            outcome = "took damage"
+        lost = health - self.pyboy.memory[HEALTH]
+        if lost > 0 and self.pyboy.memory[HEALTH]:
+            self.damage += lost
+            outcome += f", lost {lost / 4:g} heart"
         if outcome != "failed, option dropped":
             self.arrival = (node, option.id)
         self.recent.append(f"{option.description} -> {outcome}")
@@ -337,8 +357,9 @@ class Agent:
             "decision": self.decisions, "objective": name, "room": obs.room, "xy": [obs.x, obs.y],
             "options": [item.id for item in options], "choice": option.id, "description": option.description,
             "origin": origin, "outcome": outcome, "after_room": after.room, "inputs": len(option.route),
-            "survey_s": round(survey_seconds, 2), "choice_ms": round(choice_seconds * 1000, 1),
-            "node": node, "tries_here": self.memory.tries(node, option.id), "reached": reached, **details,
+            "survey_s": round(survey_seconds, 2), "survey_level": level, "choice_ms": round(choice_seconds * 1000, 1),
+            "node": node, "tries_here": self.memory.tries(node, option.id), "reached": reached,
+            "health": [self.pyboy.memory[HEALTH], self.pyboy.memory[HEALTH + 1]], **details,
         })
         if self.watch:
             print(f"{self.decisions}: [{origin}] {option.description} → {outcome}", flush=True)
@@ -358,7 +379,8 @@ class Agent:
             "rooms_visited": len({node.split("@")[0] for epoch in self.memory.epochs.values()
                                   for node in epoch["visited"]}),
             "story_states": len(self.memory.epochs), "deaths_or_retries": self.deaths,
-            "scenes_waited": self.scenes,
+            "scenes_waited": self.scenes, "health": [self.pyboy.memory[HEALTH], self.pyboy.memory[HEALTH + 1]],
+            "quarter_hearts_lost": self.damage,
             "max_repeats_of_one_option_in_one_story_state": max(tried, default=0),
             "supervisor": self.supervisor.stats if self.supervisor else None,
         }
@@ -428,6 +450,7 @@ def main():
             with (directory / "trace.jsonl").open("a" if resume else "w", encoding="utf-8") as log:
                 agent = Agent(pyboy, surveyor, policy, supervisor=supervisor, memory=memory,
                               watch=not args.headless, log=log, stall=args.stall)
+                agent.label = args.policy
                 reason = "orçamento de decisões"
                 started = time.perf_counter()
                 try:

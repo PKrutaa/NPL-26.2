@@ -36,6 +36,7 @@ class Sup:
 def agent(policy=None, supervisor=None, **options):
     made = Agent.__new__(Agent)
     made.policy, made.supervisor, made.memory = policy or Laya(), supervisor, Memory()
+    made.pyboy = SimpleNamespace(memory={0xC6AA: 12, 0xC6AB: 12})
     made.stall, made.since_progress, made.decisions, made.recent = options.get("stall", 20), 0, 0, []
     return made
 
