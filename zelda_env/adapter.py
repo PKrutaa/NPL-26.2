@@ -1,5 +1,6 @@
 """Read the pinned Ages US WRAM layout and execute bounded controller inputs."""
 
+import time
 from dataclasses import dataclass
 from typing import Optional
 
@@ -137,12 +138,18 @@ def room_layout(pyboy):
     return bytes(pyboy.memory[0xCF00:0xCFC0])
 
 
-def show_status(pyboy, prefix="Ages"):
-    """Update the title of the focused SDL window in this process."""
-    from sdl2 import SDL_GetKeyboardFocus, SDL_SetWindowTitle
+_last_console_status = 0.0
 
-    window = SDL_GetKeyboardFocus()
-    if not window:
+
+def show_status(pyboy, prefix="Ages"):
+    """Update the title of the focused SDL window. Without SDL, print once per second."""
+    global _last_console_status
+    try:
+        from sdl2 import SDL_GetKeyboardFocus, SDL_SetWindowTitle
+    except ImportError:
+        SDL_GetKeyboardFocus = None
+    window = SDL_GetKeyboardFocus() if SDL_GetKeyboardFocus else None
+    if SDL_GetKeyboardFocus and not window:
         return
     obs = observe(pyboy)
     title = f"{prefix} | frame {pyboy.frame_count} | {obs.mode}"
@@ -150,4 +157,8 @@ def show_status(pyboy, prefix="Ages"):
         title += f" | {obs.room} | XY {obs.x},{obs.y} | {obs.facing or '?'}"
     if pyboy.paused:
         title += " | paused"
-    SDL_SetWindowTitle(window, title.encode("utf-8"))
+    if window:
+        SDL_SetWindowTitle(window, title.encode("utf-8"))
+    elif time.monotonic() - _last_console_status >= 1:
+        _last_console_status = time.monotonic()
+        print(title, flush=True)
