@@ -14,7 +14,7 @@ from .adapter import DIRECTIONS, candidates, execute, observe, show_status
 from .scenarios import SCENARIOS, achieved, prepare
 
 
-def evaluate(pyboy, name, policy, seed, choose_laya=None, *, watch=False, recover=False):
+def evaluate(pyboy, name, policy, seed, choose_laya=None, *, watch=False, recover=False, lookahead=None):
     scenario = SCENARIOS[name]
     rng = random.Random(seed)
     obs = observe(pyboy)
@@ -28,6 +28,8 @@ def evaluate(pyboy, name, policy, seed, choose_laya=None, *, watch=False, recove
         choices = candidates(obs)
         start = time.perf_counter()
         details = {}
+        directions = lookahead.directions(pyboy, obs, choices) if lookahead else {}
+        allowed = tuple(key for key in choices if directions.get(key, {}).get("event") != "blocked")
         if policy == "script":
             action = scenario.script[step] if step < len(scenario.script) else "wait"
         elif policy == "random":
@@ -39,22 +41,25 @@ def evaluate(pyboy, name, policy, seed, choose_laya=None, *, watch=False, recove
                 if action in choices:
                     break
         else:
-            if recover and recovery_steps and recovery_action in choices:
+            legal_moves = [key for key in DIRECTIONS if key in allowed]
+            recent_blocks = {
+                item["action"] for item in trace[-3:] if item["event"] == "blocked"
+            }
+            alternatives = [key for key in legal_moves if key not in recent_blocks]
+            if recover and recovery_steps and recovery_action in allowed:
                 action, details = recovery_action, {"recovery": "continue"}
                 recovery_steps -= 1
-            elif recover and obs.mode == "playing" and len(trace) >= 2 and all(
+            elif recover and alternatives and obs.mode == "playing" and len(trace) >= 2 and all(
                 item["event"] == "blocked" for item in trace[-2:]
             ):
-                blocked = {
-                    item["action"] for item in trace[-3:]
-                    if item["event"] == "blocked"
-                }
-                alternatives = [key for key in DIRECTIONS if key in choices and key not in blocked]
                 action = rng.choice(alternatives)
                 details = {"recovery": "explore"}
                 recovery_action, recovery_steps = action, 4
             else:
-                action, details = choose_laya(scenario.goal, obs, choices, trace)
+                action, details = choose_laya(scenario.goal, obs, allowed, trace, directions=directions)
+                recovery_steps = 0
+        if directions:
+            details["direction_checks"] = directions
         latency = (time.perf_counter() - start) * 1000
         before = obs
         if watch:
@@ -92,14 +97,14 @@ def evaluate(pyboy, name, policy, seed, choose_laya=None, *, watch=False, recove
     }
 
 
-def watch_scenarios(pyboy, checkpoints, policy, seed):
+def watch_scenarios(pyboy, checkpoints, policy, seed, lookahead):
     # Display successful tasks first when looping over the three scenarios.
     while True:
         for name in ("approach", "dialogue", "exit"):
             if name not in checkpoints:
                 continue
             pyboy.load_state(io.BytesIO(checkpoints[name]))
-            run = evaluate(pyboy, name, "laya", seed, policy, watch=True, recover=True)
+            run = evaluate(pyboy, name, "laya", seed, policy, watch=True, recover=True, lookahead=lookahead)
             result = "concluído" if run["success"] else "limite de decisões"
             print(f"{name}: {result}", flush=True)
             # Keep showing the final frame briefly. SDL events are handled by
@@ -125,12 +130,13 @@ def main():
     parser.add_argument("--output", type=Path)
     parser.add_argument("--watch", action="store_true", help="Exibe e repete os episódios do Laya na janela SDL2")
     parser.add_argument("--recover", action="store_true", help="Exploração após bloqueios do Laya")
+    parser.add_argument("--lookahead", action="store_true", help="Consulta colisões em uma cópia headless")
     args = parser.parse_args()
     if args.trials < 1 or (args.trials != 1 and args.policy != "random" and not args.recover):
         parser.error("--trials deve ser positivo e só pode variar para random ou --recover")
 
-    if args.recover and (args.command != "run" or args.policy != "laya"):
-        parser.error("--recover requer run --policy laya")
+    if (args.recover or args.lookahead) and (args.command != "run" or args.policy != "laya"):
+        parser.error("--recover e --lookahead requerem run --policy laya")
 
     if args.watch and (args.command != "run" or args.policy != "laya"):
         parser.error("--watch requer run --policy laya")
@@ -142,6 +148,7 @@ def main():
         ram_file=io.BytesIO(bytes(8192)), sound_volume=0,
     )
     pyboy.set_emulation_speed(1 if args.watch else 0)
+    lookahead = None
     try:
         if args.command == "prepare":
             with args.checkpoint.open("rb") as file:
@@ -159,16 +166,21 @@ def main():
 
             choose_laya = LayaPolicy(args.device, args.format, args.history)
 
+        if args.lookahead:
+            from .lookahead import Lookahead
+
+            lookahead = Lookahead(args.rom)
+
         if args.watch:
             print("Laya jogando em loop. Escape fecha a janela.", flush=True)
-            watch_scenarios(pyboy, checkpoints, choose_laya, args.seed)
+            watch_scenarios(pyboy, checkpoints, choose_laya, args.seed, lookahead)
             return
 
         runs = []
         for name, checkpoint in checkpoints.items():
             for seed in range(args.seed, args.seed + args.trials):
                 pyboy.load_state(io.BytesIO(checkpoint))
-                run = evaluate(pyboy, name, args.policy, seed, choose_laya, recover=args.recover)
+                run = evaluate(pyboy, name, args.policy, seed, choose_laya, recover=args.recover, lookahead=lookahead)
                 run["checkpoint_sha256"] = hashlib.sha256(checkpoint).hexdigest()
                 runs.append(run)
                 print(f"{name}/{args.policy}/{seed}: success={run['success']} "
@@ -177,7 +189,7 @@ def main():
         output = args.output or ROOT / f"output/benchmark/{args.policy}.json"
         output.parent.mkdir(parents=True, exist_ok=True)
         report = {
-            "format": args.format, "history": args.history, "device": args.device, "recover": args.recover,
+            "format": args.format, "history": args.history, "device": args.device, "recover": args.recover, "lookahead": args.lookahead,
             "model": choose_laya.model if choose_laya else None,
             "runs": runs,
         }
@@ -189,6 +201,8 @@ def main():
     except (OSError, ValueError, RuntimeError) as error:
         parser.exit(1, f"{error}\n")
     finally:
+        if lookahead:
+            lookahead.close()
         pyboy.stop(save=False)
 
 

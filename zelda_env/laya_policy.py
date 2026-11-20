@@ -19,7 +19,7 @@ class LayaPolicy:
         self.context_format = context_format
         self.history = history
 
-    def __call__(self, goal, observation, candidates, trace):
+    def __call__(self, goal, observation, candidates, trace, *, directions=None):
         if len(candidates) == 1:
             return candidates[0], {"forced_action": True}
         state = {
@@ -38,6 +38,8 @@ class LayaPolicy:
                 if observation.collision_quadrants is not None else None
             ),
         }
+        if directions:
+            state["direction_checks"] = directions
         if self.history:
             state["recent_actions"] = [
                 {"action": step["action"], "event": step["event"]} for step in trace[-3:]

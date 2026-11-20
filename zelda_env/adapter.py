@@ -78,7 +78,7 @@ def candidates(observation):
     return ("wait",)
 
 
-def execute(pyboy, action, *, render=False):
+def execute(pyboy, action, *, render=False, hold_frames=12):
     before = observe(pyboy)
     if action not in candidates(before):
         raise ValueError(f"Ação indisponível em {before.mode}: {action}")
@@ -95,7 +95,7 @@ def execute(pyboy, action, *, render=False):
     if key:
         pyboy.button_press(key)
     try:
-        for _ in range(12 if action in DIRECTIONS or not key else 1):
+        for _ in range(hold_frames if action in DIRECTIONS or not key else 1):
             after = tick()
             if after.mode != before.mode or after.room != before.room:
                 break
