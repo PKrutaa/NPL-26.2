@@ -9,7 +9,8 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from .__main__ import DEFAULT_ROM, ROOT, rom_path
+from . import paths
+from .__main__ import add_common, resolve_common
 from .adapter import DIRECTIONS, candidates, execute, observe, show_status
 from .scenarios import SCENARIOS, achieved, prepare
 
@@ -117,9 +118,9 @@ def watch_scenarios(pyboy, checkpoints, policy, seed, lookahead):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("prepare", "run"))
-    parser.add_argument("--rom", type=rom_path, default=str(DEFAULT_ROM))
-    parser.add_argument("--checkpoint", type=Path, default=DEFAULT_ROM.with_suffix(".gbc.state"))
-    parser.add_argument("--states", type=Path, default=ROOT / "output/scenarios")
+    add_common(parser)
+    parser.add_argument("--checkpoint", type=Path, help="Seed em 00:8a, XY 124,56. Padrão: output/inicio.state")
+    parser.add_argument("--states", type=Path, help="Pasta dos checkpoints de cenário")
     parser.add_argument("--scenario", choices=("all", *SCENARIOS), default="all")
     parser.add_argument("--policy", choices=("script", "random", "human", "laya"), default="script")
     parser.add_argument("--seed", type=int, default=0)
@@ -131,7 +132,12 @@ def main():
     parser.add_argument("--watch", action="store_true", help="Exibe e repete os episódios do Laya na janela SDL2")
     parser.add_argument("--recover", action="store_true", help="Exploração após bloqueios do Laya")
     parser.add_argument("--lookahead", action="store_true", help="Consulta colisões em uma cópia headless")
-    args = parser.parse_args()
+    args = resolve_common(parser, parser.parse_args())
+    args.states = args.states or paths.output_path("scenarios")
+    if args.checkpoint is None:
+        legacy = Path(f"{args.rom}.state")
+        seed = paths.output_path("inicio.state")
+        args.checkpoint = legacy if legacy.exists() and not seed.exists() else seed
     if args.trials < 1 or (args.trials != 1 and args.policy != "random" and not args.recover):
         parser.error("--trials deve ser positivo e só pode variar para random ou --recover")
 
@@ -151,6 +157,8 @@ def main():
     lookahead = None
     try:
         if args.command == "prepare":
+            if not args.checkpoint.is_file():
+                raise ValueError(f"Seed ausente: {args.checkpoint}. Gere com: {paths.venv_python()} -m zelda_env seed")
             with args.checkpoint.open("rb") as file:
                 pyboy.load_state(file)
             pyboy.tick(1, render=False)
@@ -159,6 +167,10 @@ def main():
             return
 
         names = SCENARIOS if args.scenario == "all" else (args.scenario,)
+        missing = [name for name in names if not (args.states / f"{name}.state").is_file()]
+        if missing:
+            raise ValueError(f"Cenários ausentes em {args.states}: {', '.join(missing)}. "
+                             f"Gere com: {paths.venv_python()} -m zelda_env.benchmark prepare")
         checkpoints = {name: (args.states / f"{name}.state").read_bytes() for name in names}
         choose_laya = None
         if args.policy == "laya":
@@ -186,14 +198,13 @@ def main():
                 print(f"{name}/{args.policy}/{seed}: success={run['success']} "
                       f"decisions={run['decisions']} frames={run['frames']}")
 
-        output = args.output or ROOT / f"output/benchmark/{args.policy}.json"
-        output.parent.mkdir(parents=True, exist_ok=True)
+        output = args.output or paths.output_path("benchmark", f"{args.policy}.json")
         report = {
             "format": args.format, "history": args.history, "device": args.device, "recover": args.recover, "lookahead": args.lookahead,
             "model": choose_laya.model if choose_laya else None,
             "runs": runs,
         }
-        output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
+        paths.atomic_write(output, (json.dumps(report, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
         print(f"Relatório salvo em {output}")
     except (InterruptedError, KeyboardInterrupt):
         if not args.watch:

@@ -5,7 +5,8 @@ from functools import partial
 from io import BytesIO
 from pathlib import Path
 
-from .__main__ import DEFAULT_ROM, ROOT, rom_path
+from . import paths
+from .__main__ import add_common, resolve_common
 from .adapter import execute, observe, show_status
 from .lookahead import Lookahead
 
@@ -246,12 +247,14 @@ STAGES = (
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--rom", type=rom_path, default=str(DEFAULT_ROM))
-    parser.add_argument("--seed-state", type=Path, default=ROOT / "output/scenarios/exit.state")
-    parser.add_argument("--directory", type=Path, default=ROOT / "output/campaign")
+    add_common(parser)
+    parser.add_argument("--seed-state", type=Path, help="Padrão: output/scenarios/exit.state")
+    parser.add_argument("--directory", type=Path, help="Pasta dos marcos. Padrão: output/campaign")
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--script-dialogue", action="store_true")
-    args = parser.parse_args()
+    args = resolve_common(parser, parser.parse_args())
+    args.seed_state = args.seed_state or paths.output_path("scenarios", "exit.state")
+    args.directory = args.directory or paths.output_path("campaign")
 
     from pyboy import PyBoy
 
@@ -284,10 +287,9 @@ def main():
             print(f"Em andamento: {name}", flush=True)
             stage(campaign)
             checkpoint = args.directory / f"{name}.state"
-            temporary = checkpoint.with_suffix(".tmp")
-            with temporary.open("wb") as stream:
-                pyboy.save_state(stream)
-            temporary.replace(checkpoint)
+            stream = BytesIO()
+            pyboy.save_state(stream)
+            paths.atomic_write(checkpoint, stream.getvalue())
             obs = observe(pyboy)
             print(f"Marco salvo: {name} | {obs.room} | X={obs.x} Y={obs.y}", flush=True)
         if not args.headless:
