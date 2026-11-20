@@ -116,3 +116,15 @@ def test_a_character_with_many_lines_is_talked_to_three_times():
     # Another character in the same place is unaffected.
     other = Option("interact:slot5:a:text0", "interact", "talk", ())
     assert memory.fresh(node, [*lines, other]) == [other]
+
+
+def test_tool_uses_in_one_area_run_out():
+    memory = Memory()
+    digs = [Option(f"item:15:3a:{index:02x}", "interact", "dig", ()) for index in range(14)]
+    door = Option("exit:B", "exit", "door", (), "B")
+    node = node_of("A", [door])
+    memory.arrive(node, [*digs, door])
+    for option in digs[:10]:
+        assert option in memory.fresh(node, [*digs, door])
+        memory.record(node, option.id)
+    assert memory.fresh(node, [*digs, door]) == [door]

@@ -29,6 +29,7 @@ TREASURES = 0xC69A
 TEXT_DISPLAY_STATE = (7, 0xD0C0)
 MEMORY_FORMAT = 4
 TALKS_PER_CHARACTER = 3
+TOOL_USES_PER_AREA = 10
 SURVEY_LEVELS = (
     {"grid": 16, "stride": 16, "limit": 400},
     {"grid": 8, "stride": 12, "limit": 700},
@@ -55,7 +56,8 @@ OBJECTIVES = (
     ("passado", (("00:39", "Walk into the event."),), "Go south.", _flag(GLOBAL_FLAGS, 0x41)),
     ("pa", (("01:76", "Enter the door or stairs."),), "Go to a new room or talk to the character.",
      _flag(TREASURES, 0x15)),
-    ("maku-tree-salva", (("01:48", "Use the item on the ground."),), "Go to a new room.",
+    ("maku-tree-salva", (("01:48", "Use the item on the ground or enter the door or stairs."),),
+     "Go to a new room.",
      _flag(GLOBAL_FLAGS, 0x12)),
     ("chave-do-cemiterio", (("01:39", "Walk into the event."), ("00:38", "Talk to the character."),
                             ("00:7c", "Enter the door or stairs.")),
@@ -124,9 +126,18 @@ class Memory:
             prefix = f"{node}|{':'.join(option.id.split(':')[:2])}:"
             return sum(key.startswith(prefix) for key in self.current["tried"]) >= TALKS_PER_CHARACTER
 
+        def tool_use(name):
+            return name.startswith("item:") or (name.startswith("interact:") and name.endswith(":event")
+                                                and not name.startswith("interact:slot"))
+
+        # A tool can act on every tile of a room. After enough tries in one area with no
+        # progress, more of the same is not something new.
+        worn = sum(count for key, count in self.current["tried"].items()
+                   if key.startswith(f"{node}|") and tool_use(key.split("|", 1)[1])) >= TOOL_USES_PER_AREA
+
         return [option for option in options
                 if (node, option.id) not in self.banned and not self.tries(node, option.id)
-                and not chatty(option)]
+                and not chatty(option) and not (worn and tool_use(option.id))]
 
     def arrive(self, node, options, origin=None, via=None):
         """Record the area Link is in, and how he got here."""
