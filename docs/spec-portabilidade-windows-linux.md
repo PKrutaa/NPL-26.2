@@ -131,6 +131,20 @@ Compatibilidade de `.sav` e de `.state` são critérios separados. Primeiro cert
 4. Desabilitar `mps` fora de máquinas que exponham esse backend. Em Windows/Linux, CPU é o critério de entrega. Registrar versões realmente instaladas, dispositivo, revisão, latência e RAM de pico por plataforma. Considerar arquivos de configuração, pesos, tokenizer e encoder necessários ao snapshot. Uma preparação bem-sucedida é o download completo mais a inferência de prova com aqueles arquivos.
 5. Separar instalação e resultado da política. O teste de integração passa quando o Laya offline processa o contexto, devolve uma decisão candidata válida e o executor a aplica dentro do orçamento. Sucesso do episódio, mudança de escolha entre plataformas e performance são resultados a reportar. Não usar o sucesso do modelo como substituto do teste determinístico de replay.
 
+### 8.1 LLM supervisor local e opcional
+
+Testar primeiro um modelo *instruct* quantizado de **1 a 3 bilhões de parâmetros**, com inferência em CPU. Essa faixa é um ponto de partida para o experimento. Escolher o checkpoint e o runtime após medir memória, latência e qualidade no Windows, no Linux e no macOS. O supervisor tem perfil de instalação e cache próprios. Ele usa pesos locais e pode ser desligado por parâmetro ou configuração. A portabilidade do runtime base e do Laya é certificada independentemente desta opção.
+
+**Divisão de responsabilidades.** O Laya continua no caminho rápido da decisão. O planner e o executor verificam caminhos, limites de frames e ações legais. O supervisor trabalha no nível de subobjetivos: pode priorizar uma saída conhecida, sugerir conversar com um NPC observado, propor usar um item equipado quando o adapter oferecer essa opção ou recomendar uma sondagem já disponível. Inicialmente, ele ajuda a escolher entre opções que o código já sabe executar. O conjunto de capacidades cresce conforme o adapter aprende novas mecânicas.
+
+**Quando chamar.** Acionar em impasses que o jogo confirma, como dois movimentos bloqueados seguidos com recuperação esgotada, retorno repetido ao mesmo estado sem progresso ou fim de um plano sem atingir seu predicado. Considerar mudança de sala, aquisição de item, avanço de diálogo e mudança de terreno como sinais de progresso. Excluir do contador a espera planejada em animações, transições e cutscenes. Após uma consulta, exigir progresso ou aguardar uma janela de ações antes de consultar novamente. Como valores iniciais de teste, usar até duas consultas por impasse, 20 segundos por consulta e intervalo de seis ações executadas. A emulação permanece estável na decisão, com fechamento da janela responsivo.
+
+**Contexto mínimo.** Enviar objetivo ativo, modo, sala, XY, direção, opções verificadas de movimento, saídas conhecidas, itens equipados, interações visíveis, resumo das últimas ações com seus efeitos e predicado pendente. Dados ausentes aparecem como desconhecidos. O contexto resulta do estado do próprio jogo e é limitado por tamanho. Captura visual, transcrição de diálogo e guias externos podem ser experimentos separados.
+
+**Contrato da resposta.** O supervisor devolve um objeto JSON com `option_id` pertencente à lista fornecida e um `reason` curto e opcional para o log. A lista de opções inclui `abstain`. O controlador valida schema, existência da opção, modo, pré-condições e orçamento. Todo input continua passando pelo executor. Resposta inválida, timeout, falta de pesos ou abstenção usam a recuperação existente e, se ela também se esgotar, registram o impasse preservando o último checkpoint válido. O supervisor não escreve na memória do jogo, no save ou no shell.
+
+**Avaliação.** Comparar três condições com os mesmos checkpoints e orçamento de ações/frames: Laya, Laya com recuperação, Laya com recuperação e supervisor. Incluir a parede já reproduzida, um ciclo com deslocamento e um progresso de campanha que exija escolher entre navegação e interação. Manter um cenário que já funciona para verificar regressão. Registrar sucesso, marcos novos, estados revisitados, bloqueios, chamadas, respostas rejeitadas, latência adicional e pico de RAM. Separar casos usados para ajustar prompts dos usados para avaliar generalização. Promover o supervisor só se a comparação mostrar ganho em impasses com custo aceitável nos alvos. Considerar um modelo maior apenas se o pequeno ficar aquém nos testes que o supervisor foi projetado para resolver.
+
 ## 9. Plano de implementação
 
 | Etapa | Entrega | Dependências | Gate |
@@ -139,6 +153,7 @@ Compatibilidade de `.sav` e de `.state` são critérios separados. Primeiro cert
 | P1 · Runtime | Central de paths, launchers, mensagens por plataforma, smoke sem GUI, armazenamento e migração. | P0 base | `play` e `smoke` com ROM externa em ambos os alvos; operações de arquivo passam nos casos de falha. |
 | P2 · Build | Build Linux e Windows, staging, locks de cache, símbolos e manifesto. | P0 toolchain | Hash oficial de projeto em build frio e quente de cada alvo; Windows com path contendo espaço e Unicode. |
 | P3 · Agente | Extra CPU, preparação offline, seed de cenários, `--watch`, campanha e documentação de retomada. | P1, locks CPU | Script nos três cenários, Choice offline e campanha no último marco da base portátil. |
+| P3b · Supervisor opcional | Contrato de subobjetivos, backend local pequeno, fallback e comparação isolada. | P3, fixtures de impasse | A12 e A13, sem dependência para a certificação base. |
 | P4 · Integração | CI, walkthrough de aceitação desktop e README com matriz suportada. | P1–P3 | Evidência dos gates abaixo, regressão macOS e instalação por outra pessoa a partir da documentação. |
 
 Organizar os PRs por P1/P2/P3/P4, com review de portabilidade, commits pequenos e sem binários. A primeira entrega utilizável é P1 com ROM externa. Pode ser divulgada como suporte do emulador enquanto P2 e P3 são certificados separadamente. Alterações de ABI do PyBoy, revisão do modelo ou versão do ROM build exigem nova execução da matriz.
@@ -158,6 +173,8 @@ Organizar os PRs por P1/P2/P3/P4, com review de portabilidade, commits pequenos 
 | A09 | Rodar `--watch` e campanha local no alvo e fechar com Esc; retomar campanha em diretório de sessão separado. | Frame visível, estados e ações no título ou terminal, replay do benchmark e avanço ao marco publicado e verificável da base, com reabertura pelo último checkpoint. |
 | A10 | Exportar SRAM e savestate da origem macOS e testar importação em cada alvo, testar também Windows ↔ Linux. | Relatório por par com hash de SRAM, versão do PyBoy, restauração e comparação lógica. Registrar pares que exigem criação de novo checkpoint. |
 | A11 | Executar novamente o conjunto no macOS arm64, incluindo `Jogar.command`. | Instalação, play, smoke e retomada continuam disponíveis. |
+| A12 | Ativar supervisor offline em impasse conhecido e em cena que já avança. | Chamada só no impasse, opção válida executada sem saltar o planner, métricas comparadas com o supervisor desligado. |
+| A13 | Simular timeout, JSON inválido, opção inexistente, abstenção e ausência de pesos. | Recuperação limitada aciona, nenhum input inválido é executado, janela segue fechável e último checkpoint válido pode ser retomado. |
 
 ### Formato de evidência
 
@@ -181,6 +198,7 @@ Para cada run de aceitação, guardar commit do projeto, ID do teste, sistema e 
 | Seed compartilhável para campanha | Definir se será produzido a partir de inputs de boot ou criado por um walkthrough manual validado. Registrar posição e hash da ROM. | Campanha precisa de checkpoint válido local. Smoke e jogo humano seguem disponíveis. |
 | Cross-platform de savestate | Validar pares de exportação/importação, formato e estado lógico. | Documentar quais pares estão comprovados. Preservar importação de SRAM e criação de novos checkpoints. |
 | Tempo e memória do planner | Medir pelo menos uma execução da campanha com logs de duração por marco e pico de RAM. | Definir limites a partir da medição. Usar retomada por checkpoint quando excedidos e registrar o marco afetado. |
+| Supervisor consome CPU/RAM ou repete estratégias | Medir com o perfil CPU nos três alvos e comparar checkpoints reservados. | Manter opt-in, reduzir o contexto ou o orçamento e só testar modelo maior se a falha for de decisão. |
 | Canal de distribuição | Começar com clone + venv + launchers, usando fontes e logs públicos. Avaliar builds empacotados e assinatura depois da primeira matriz verde. | A entrega fonte continua funcional via comandos documentados. |
 
 A entrega de suporte inclui comandos do zero por plataforma, toolchains ou rota alternativa certificada, localização de dados e procedimento de importação, logs sanitizados dos testes e uma tabela pública com a versão e modos comprovados. A validação do desempenho ou da qualidade do Laya permanece nos relatórios de experimento. A aprovação final exige que cada sistema satisfaça os gates que aparecem como suportados no README.
