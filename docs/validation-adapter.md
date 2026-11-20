@@ -27,3 +27,7 @@ Os logs incluem hash do checkpoint, hash do estado final, ações e observaçõe
 ## Limites da observação
 
 XY são pixels locais. O leitor reconhece os slots de interação com sprite visível dentro da tela e identifica Impa e os macacos. Outros slots ficam com tipo desconhecido. As máscaras de colisão cobrem salas pequenas e registram geometria estática em quadrantes. Objetos, equipamento e estado podem influenciar se um movimento realmente acontece. O leitor detecta estados de texto e avanço de página sem transcrever o diálogo.
+
+## Recuperação após bloqueios
+
+Com o mesmo modelo, checkpoint e limite de 12 decisões, a exploração após dois movimentos bloqueados chegou à saída em 7 de 10 sementes. A semente 0 concluiu em 11 decisões e 182 frames. A política original repetiu direita nas 12 decisões e terminou sem sair. A exploração escolhe entre direções que não acabaram de falhar e mantém a direção sorteada por até cinco ações enquanto houver movimento. O modo `--watch` varia a semente a cada volta. A comparação ainda se limita ao mesmo checkpoint.

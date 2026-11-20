@@ -10,16 +10,18 @@ from dataclasses import asdict
 from pathlib import Path
 
 from .__main__ import DEFAULT_ROM, ROOT, rom_path
-from .adapter import candidates, execute, observe, show_status
+from .adapter import DIRECTIONS, candidates, execute, observe, show_status
 from .scenarios import SCENARIOS, achieved, prepare
 
 
-def evaluate(pyboy, name, policy, seed, choose_laya=None, *, watch=False):
+def evaluate(pyboy, name, policy, seed, choose_laya=None, *, watch=False, recover=False):
     scenario = SCENARIOS[name]
     rng = random.Random(seed)
     obs = observe(pyboy)
     initial = asdict(obs)
     trace = []
+    recovery_action = None
+    recovery_steps = 0
     talking_to_monkey = False
     monkey_dialogue_advanced = False
     for step in range(scenario.budget):
@@ -37,14 +39,32 @@ def evaluate(pyboy, name, policy, seed, choose_laya=None, *, watch=False):
                 if action in choices:
                     break
         else:
-            action, details = choose_laya(scenario.goal, obs, choices, trace)
+            if recover and recovery_steps and recovery_action in choices:
+                action, details = recovery_action, {"recovery": "continue"}
+                recovery_steps -= 1
+            elif recover and obs.mode == "playing" and len(trace) >= 2 and all(
+                item["event"] == "blocked" for item in trace[-2:]
+            ):
+                blocked = {
+                    item["action"] for item in trace[-3:]
+                    if item["event"] == "blocked"
+                }
+                alternatives = [key for key in DIRECTIONS if key in choices and key not in blocked]
+                action = rng.choice(alternatives)
+                details = {"recovery": "explore"}
+                recovery_action, recovery_steps = action, 4
+            else:
+                action, details = choose_laya(scenario.goal, obs, choices, trace)
         latency = (time.perf_counter() - start) * 1000
         before = obs
         if watch:
             show_status(pyboy, f"Laya | {name} | {action}")
         obs, event, frames = execute(pyboy, action, render=watch)
+        if event != "moved":
+            recovery_steps = 0
         if watch:
-            print(f"{name} {step + 1}/{scenario.budget}: {action} → {event}", flush=True)
+            source = " [exploração]" if "recovery" in details else ""
+            print(f"{name} {step + 1}/{scenario.budget}: {action} → {event}{source}", flush=True)
             show_status(pyboy, f"Laya | {name} | {action}: {event}")
             time.sleep(0.35)
         if event == "dialogue_opened":
@@ -79,13 +99,14 @@ def watch_scenarios(pyboy, checkpoints, policy, seed):
             if name not in checkpoints:
                 continue
             pyboy.load_state(io.BytesIO(checkpoints[name]))
-            run = evaluate(pyboy, name, "laya", seed, policy, watch=True)
+            run = evaluate(pyboy, name, "laya", seed, policy, watch=True, recover=True)
             result = "concluído" if run["success"] else "limite de decisões"
             print(f"{name}: {result}", flush=True)
             # Keep showing the final frame briefly. SDL events are handled by
             # the next tick and the next episode restores its own checkpoint.
             show_status(pyboy, f"Laya | {name} | {result}")
             time.sleep(1.4)
+        seed += 1
 
 
 def main():
@@ -103,9 +124,13 @@ def main():
     parser.add_argument("--device", choices=("cpu", "mps"), default="cpu")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--watch", action="store_true", help="Exibe e repete os episódios do Laya na janela SDL2")
+    parser.add_argument("--recover", action="store_true", help="Exploração após bloqueios do Laya")
     args = parser.parse_args()
-    if args.trials < 1 or (args.trials != 1 and args.policy != "random"):
-        parser.error("--trials deve ser positivo e só pode variar para random")
+    if args.trials < 1 or (args.trials != 1 and args.policy != "random" and not args.recover):
+        parser.error("--trials deve ser positivo e só pode variar para random ou --recover")
+
+    if args.recover and (args.command != "run" or args.policy != "laya"):
+        parser.error("--recover requer run --policy laya")
 
     if args.watch and (args.command != "run" or args.policy != "laya"):
         parser.error("--watch requer run --policy laya")
@@ -143,7 +168,7 @@ def main():
         for name, checkpoint in checkpoints.items():
             for seed in range(args.seed, args.seed + args.trials):
                 pyboy.load_state(io.BytesIO(checkpoint))
-                run = evaluate(pyboy, name, args.policy, seed, choose_laya)
+                run = evaluate(pyboy, name, args.policy, seed, choose_laya, recover=args.recover)
                 run["checkpoint_sha256"] = hashlib.sha256(checkpoint).hexdigest()
                 runs.append(run)
                 print(f"{name}/{args.policy}/{seed}: success={run['success']} "
@@ -152,7 +177,7 @@ def main():
         output = args.output or ROOT / f"output/benchmark/{args.policy}.json"
         output.parent.mkdir(parents=True, exist_ok=True)
         report = {
-            "format": args.format, "history": args.history, "device": args.device,
+            "format": args.format, "history": args.history, "device": args.device, "recover": args.recover,
             "model": choose_laya.model if choose_laya else None,
             "runs": runs,
         }
