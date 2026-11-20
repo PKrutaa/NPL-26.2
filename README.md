@@ -9,8 +9,8 @@ O projeto usa o PyBoy para rodar Oracle of Ages US, permitir controle humano e p
 | Emulador | Jogável no macOS. A CLI oferece janela SDL2, controles por teclado, save de cartucho e checkpoints. |
 | Build da ROM | Script com commits fixados, verificação de SHA-1 e exportação de símbolos para o PyBoy. |
 | Replay | Smoke headless confirma que a mesma sequência de inputs, repetida após restaurar um checkpoint, produz o mesmo estado serializado e os mesmos pixels. |
-| Adapter semântico | Em planejamento. A CLI ainda não lê posição, direção ou sala do jogador e não expõe observações estruturadas nem um catálogo de ações para agentes. |
-| Jev/Laya | Integração e avaliação pendentes. |
+| Adapter semântico | Lê sala, posição, direção, interações visíveis, quadrantes de colisão em salas pequenas e estado de diálogo. Executa ações curtas via PyBoy. |
+| Laya local | Inferência offline validada com o checkpoint clássico. Concluiu aproximação e diálogo com texto sem histórico, e travou na saída. |
 
 A [validação local](docs/validation-emulator.md) registra a sessão jogável de 28 de outubro de 2026 e a repetição do smoke em 20 de novembro de 2026.
 
@@ -117,10 +117,43 @@ O comando roda sem janela, com RAM de cartucho isolada em memória. Não carrega
 
 Isso verifica boot, API de inputs e replay determinístico no emulador real. Não prova que Link se moveu em gameplay: a sequência pode estar na introdução/menu. A conferência visual e uma sessão jogável complementam o teste. Também não valida percepção, NPCs, terreno ou decisões do modelo.
 
+## Adapter e Laya local
+
+Para ver frame, modo, sala, posição e direção no título, abra o emulador com o comando abaixo e clique na janela.
+
+```bash
+.venv/bin/python -m zelda_env play --observe --load-state roms/oracle-of-ages.gbc.state
+```
+
+Os experimentos partem de três checkpoints locais. O comando `prepare` deriva os três com inputs normais a partir do checkpoint Z/X do início do jogo em `00:8a`, posição `124,56`. Em outra máquina, use `--checkpoint /caminho/inicial.state` para indicar uma cópia desse ponto. Os arquivos `.state` são locais.
+
+```bash
+.venv/bin/python -m pip install -e '.[laya]'
+.venv/bin/python -m zelda_env.benchmark prepare
+.venv/bin/python -m zelda_env.benchmark run --policy script
+.venv/bin/python -m zelda_env.benchmark run --policy random --trials 10
+.venv/bin/python -m zelda_env.benchmark run --policy human --scenario approach
+.venv/bin/python -m zelda_env.benchmark run --policy laya
+```
+
+A política humana recebe a mesma observação no terminal e escolhe entre as mesmas ações. A primeira execução com Laya baixa os pesos fixados do Hugging Face. A inferência ocorre no próprio processo Python, em CPU por padrão. Com os pesos no cache, execute offline com `HF_HUB_OFFLINE=1`.
+
+```bash
+HF_HUB_OFFLINE=1 .venv/bin/python -m zelda_env.benchmark run --policy laya --format text
+HF_HUB_OFFLINE=1 .venv/bin/python -m zelda_env.benchmark run --policy laya \
+  --format json --history --output output/benchmark/laya-json-history.json
+```
+
+O PyBoy aguarda enquanto a política escolhe. Cada execução registra resultado, decisões, frames, bloqueios e latência em `output/benchmark/`. As execuções isolam o save de cartucho em memória. Veja os [resultados e limites da avaliação](docs/validation-adapter.md).
+
 ## Estrutura
 
 ```text
 zelda_env/__main__.py       CLI play/smoke e ciclo de vida do emulador
+zelda_env/adapter.py        Leitura de WRAM, telemetria e ações de controle
+zelda_env/scenarios.py      Preparação e critérios de sucesso dos três cenários
+zelda_env/benchmark.py      Execução de políticas e logs de avaliação
+zelda_env/laya_policy.py    Inferência local de Choice
 scripts/build_rom.py       Build fixado e verificação da ROM
 Jogar.command              Launcher do Finder no macOS
 requirements.lock.txt      Versões Python resolvidas na máquina validada
@@ -131,7 +164,7 @@ saves/                     Progresso do jogo, ignorado
 output/                    Capturas e relatórios, ignorados
 ```
 
-Não há servidor nem chamada a APIs de modelos nesta etapa. O modo humano usa os plugins de teclado do PyBoy e avança um frame por `tick()`. O smoke usa o mesmo core com `window="null"`. O futuro decoder pode observar essa mesma instância; não será necessário reimplementar a engine.
+A janela de jogo usa o teclado do PyBoy e avança um frame por `tick()`. O smoke e o benchmark usam o mesmo core no modo headless.
 
 ## Problemas comuns
 
@@ -145,8 +178,6 @@ Não há servidor nem chamada a APIs de modelos nesta etapa. O modo humano usa o
 
 ## Próximo passo
 
-O primeiro passo do adapter é ler posição XY, direção e sala na mesma instância do PyBoy e conferir os valores contra movimentos e transições observados na janela. A leitura precisa representar estados desconhecidos, como durante transições, e distinguir direção do personagem de deslocamento observado.
-
-A [proposta de arquitetura](docs/architecture-brainstorm.md) detalha o caminho seguinte: observações de entidades e terreno, execução de ações curtas com limites de frames, cenários reproduzíveis e, por fim, integração com Jev/Laya. A [pesquisa sobre Oracle of Ages](docs/research-oracle-of-ages.md) reúne os pontos de partida para a leitura da memória.
+Expandir a avaliação para outros pontos de partida e entender por que o Laya insiste em andar contra a parede no cenário de saída. A [proposta de arquitetura](docs/architecture-brainstorm.md) registra o desenho original. A [pesquisa sobre Oracle of Ages](docs/research-oracle-of-ages.md) reúne as referências para a leitura de memória.
 
 Referências: [API PyBoy](https://docs.pyboy.dk/api/pyboy.html), [controles PyBoy](https://docs.pyboy.dk/wiki/development/getting-started.html), [disassembly](https://github.com/Stewmath/oracles-disasm), [WLA-DX](https://github.com/vhelin/wla-dx).
