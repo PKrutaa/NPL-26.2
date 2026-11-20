@@ -93,7 +93,8 @@ class Memory:
         self.epochs = {}
         self.edges = {}  # node -> {option_id: node reached}
         self.banned = set()  # (node, option_id): led to death or left Link without control
-        self.landmarks = {}  # objective -> how many of its landmarks were reached
+        self.landmarks = {}  # objective -> which step it is on
+        self.decisions = 0  # carried across sessions, so a resumed trace keeps counting
         self.epoch = None
         self.current = None
         self.enter(b"")
@@ -165,7 +166,8 @@ class Memory:
 
     def dump(self):
         return {"format": MEMORY_FORMAT, "epochs": self.epochs, "edges": self.edges,
-                "banned": sorted(map(list, self.banned)), "epoch": self.epoch, "landmarks": self.landmarks}
+                "banned": sorted(map(list, self.banned)), "epoch": self.epoch, "landmarks": self.landmarks,
+                "decisions": self.decisions}
 
     @classmethod
     def load(cls, data):
@@ -176,6 +178,7 @@ class Memory:
         memory.banned = {tuple(item) for item in data["banned"]}
         memory.epoch = data["epoch"]
         memory.landmarks = data.get("landmarks", {})
+        memory.decisions = data.get("decisions", 0)
         memory.current = memory.epochs[memory.epoch]
         return memory
 
@@ -531,10 +534,12 @@ def main():
                 agent = Agent(pyboy, surveyor, policy, supervisor=supervisor, memory=memory,
                               watch=not args.headless, log=log, stall=args.stall)
                 agent.label = args.policy
+                agent.decisions = agent.memory.decisions
+                budget = agent.decisions + args.decisions
                 reason = "orçamento de decisões"
                 started = time.perf_counter()
                 try:
-                    while agent.decisions < args.decisions:
+                    while agent.decisions < budget:
                         reached = len(agent.done)
                         if not agent.step():
                             reason = "impasse"
@@ -569,6 +574,7 @@ def save(pyboy, agent, state_path, memory_path):
     pyboy.save_state(stream)
     paths.atomic_write(state_path, stream.getvalue())
     if memory_path:
+        agent.memory.decisions = agent.decisions
         paths.atomic_write(memory_path, json.dumps(agent.memory.dump()).encode("utf-8"))
 
 
