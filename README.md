@@ -159,6 +159,18 @@ HF_HUB_OFFLINE=1 .venv/bin/python -m zelda_env.benchmark run --policy laya \
 
 O PyBoy aguarda enquanto a política escolhe. Cada execução registra resultado, decisões, frames, bloqueios e latência em `output/benchmark/`. As execuções isolam o save de cartucho em memória. Veja os [resultados e limites da avaliação](docs/validation-adapter.md).
 
+## Campanha local
+
+O modo campanha executa uma sequência de objetivos e salva o estado entre marcos em `output/campaign/`. Ele retoma do último marco existente no diretório. A navegação busca sequências de inputs em uma cópia headless do PyBoy, e o Laya local escolhe entre A e B quando o diálogo aceita entrada. A partida principal evolui com inputs de controle e usa SRAM em memória.
+
+```bash
+HF_HUB_OFFLINE=1 .venv/bin/python -m zelda_env.campaign
+```
+
+Use `--headless --directory output/campaign-verify` para validar em uma execução separada e `--script-dialogue` para comparar com a política fixa da tecla A. O modo campanha começa no checkpoint usado para o cenário `exit`, gerado pelo comando `prepare` acima.
+
+No benchmark, `--lookahead` mostra o efeito próximo de cada direção ao modelo e exclui ações que o teste no emulador confirmou estarem bloqueadas. No checkpoint da saída, o Laya deixou de colidir, mas ainda se desviou e esgotou as 12 decisões. A busca usada na campanha recebe objetivos de sala e de interação definidos à mão.
+
 ## Estrutura
 
 ```text
@@ -167,6 +179,8 @@ zelda_env/adapter.py        Leitura de WRAM, telemetria e ações de controle
 zelda_env/scenarios.py      Preparação e critérios de sucesso dos três cenários
 zelda_env/benchmark.py      Execução de políticas e logs de avaliação
 zelda_env/laya_policy.py    Inferência local de Choice
+zelda_env/lookahead.py      Simulação local de ações e busca de rotas
+zelda_env/campaign.py       Objetivos e checkpoints da campanha
 scripts/build_rom.py       Build fixado e verificação da ROM
 Jogar.command              Launcher do Finder no macOS
 requirements.lock.txt      Versões Python resolvidas na máquina validada
