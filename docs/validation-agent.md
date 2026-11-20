@@ -88,6 +88,70 @@ O supervisor absteve nas quatro consultas, inclusive em duas com uma saída na d
 
 Com isso, o supervisor está integrado e seguro, mas ainda não há evidência de que ele melhora o resultado.
 
+## Segunda rodada: comparação, contexto curto, luta e itens
+
+As medições abaixo são do mesmo dia e da mesma máquina, depois da execução de 150 decisões descrita acima.
+
+### Comparação com outras políticas
+
+Mesmo seed, mesmo orçamento de 150 decisões e as mesmas opções candidatas. Só muda quem escolhe entre as opções novas. Uma execução de cada.
+
+| Política | Objetivos | Como terminou |
+| --- | --- | --- |
+| Laya, contexto longo | `espada` na 29, `maku-tree` na 96, `passado` na 98 | Orçamento esgotado, 56 salas |
+| `shortest`, a opção de rota mais curta | `espada` na 22 | Impasse na decisão 83, 13 salas |
+| `random`, semente 0 | `espada` na 55 | Impasse na decisão 110, 13 salas |
+
+As duas políticas de comparação pararam na floresta. O Laya saiu dela. Com uma execução de cada, isso é um indício e não uma prova: a diferença pode vir da ordem em que as salas foram visitadas.
+
+### Contexto curto para o Laya
+
+Foram reunidas as 23 decisões da execução acima em que havia uma saída na direção citada pelo objetivo e outra em direção diferente. A pergunta foi qual saída cada modelo escolhe.
+
+| Quem escolhe e com qual contexto | Escolheu a saída na direção do objetivo |
+| --- | --- |
+| Acaso | 6,5 de 23, esperado |
+| Laya, contexto longo: objetivo em frase, sala, posição e histórico | 9 de 23 |
+| Laya, contexto longo com "leva para perto" e "leva para longe" nas opções | 9 de 23 |
+| `qwen2.5:1.5b`, contexto longo | 10 de 23, com 8 abstenções |
+| Laya, objetivo `Go north.` e opções `Go north`, `Go south` | 23 de 23, confiança média 0,87 |
+
+Com isso o agente passou a enviar ao Laya só um objetivo curto e opções curtas. Em 13 casos escritos à mão com objetivos de outros tipos (`Go to a new room.`, `Talk to the character.`, `Attack the enemy.`, `Use the item on the ground.`), o Laya escolheu a opção esperada nos 11 que tinham resposta certa. Esses casos serviram para desenhar o texto e não medem generalização.
+
+### Execução do boot com contexto curto e objetivos em etapas
+
+| Objetivo | Decisão em que foi concluído | Antes, com contexto longo |
+| --- | --- | --- |
+| `espada` | 21 | 29 |
+| `maku-tree` | 34 | 96 |
+| `passado` | 36 | 98 |
+| `pa`, a pá na Black Tower | 120 | não alcançado em 150 |
+
+Depois da pá, na mesma execução, o agente foi até o portão do Maku Path, cavou os montes de terra, entrou e venceu as lutas das duas primeiras salas. Ele parou na sala dos blocos, com a versão do código anterior às correções de empurrar descritas abaixo. O levantamento por decisão ficou entre 3 e 5 segundos.
+
+### Capacidades verificadas em estados de teste
+
+Os estados de teste abaixo foram produzidos pela campanha escrita à mão a partir do checkpoint do agente no passado. Em cada um, o levantamento e a execução usaram só as opções genéricas. Nenhuma rota foi escrita.
+
+| Situação | Resultado |
+| --- | --- |
+| Três morcegos na primeira sala do Maku Path do passado | Três lutas vencidas sem perder vida, uma por decisão. |
+| Três inimigos na sala seguinte | Vencidos sem perder vida. A porta norte abre depois da última luta e o agente a encontra. |
+| Portão do Maku Path com montes de terra | A pá abre os montes um a um e a entrada aparece. |
+| Sala com três blocos sobre buracos | As três empurradas saem na ordem certa, o baú aparece e a chave pequena é obtida. Funciona também com Link começando desalinhado. |
+| Pá guardada no inventário em vez de equipada | A opção de cavar continua disponível. A rota abre o menu, equipa com botões reais e cava. |
+| Inimigo atrás de obstáculo, sem caminho | Nenhuma luta é oferecida. |
+
+Na sala do Octorok (`00:64`), o estado de teste foi montado movendo Link por escrita em memória. Esse estado serviu só para desenvolver a luta e não entra em nenhuma execução do agente.
+
+### Vida
+
+Nas primeiras execuções Link terminava com meio coração de três, sem nenhuma morte registrada. A causa era o teste de empurrar, que segura a direção por 60 frames e podia jogar Link num buraco ou na água. Os testes de interagir, empurrar e esperar passaram a conferir a vida, inclusive o dano que chega com atraso. Depois disso, uma sessão de 70 decisões no mesmo trecho terminou com a vida cheia. Cada decisão agora registra a vida.
+
+### CI
+
+O workflow rodou no GitHub nos três sistemas e passou: instalação do perfil base, compilação, ajuda de todas as CLIs, testes unitários e a checagem de erro com ROM ausente. Isso cobre Windows e Ubuntu só nesses pontos. ROM, janela, save e Laya não foram executados nessas plataformas.
+
 ## Estado em relação à spec
 
 | Item da spec | Estado |
@@ -101,8 +165,8 @@ Com isso, o supervisor está integrado e seguro, mas ainda não há evidência d
 | Build da ROM no Windows (MSYS2) | Não implementado. O script informa e orienta a usar `--rom`. |
 | Destino do checkpoint Z/X independente da ROM | Não implementado. Continua ao lado da ROM. |
 | Locks de dependência por plataforma com hashes | Não implementado. O lock atual é o do macOS. |
-| CI em Windows, Ubuntu e macOS | Workflow escrito. Ainda não rodou no GitHub. |
+| CI em Windows, Ubuntu e macOS | Rodou e passou nos três sistemas, sem ROM e sem janela. |
 | Supervisor: contrato, orçamento, fallback | Implementado e testado. |
 | Supervisor: comparação das três condições com checkpoints reservados | Não feita. |
-| Agente: percepção de inimigos, combate, HP, inventário | Não implementado. O levantamento só evita rotas que causam dano. |
+| Agente: percepção de inimigos, combate, HP, inventário | Luta de espada, leitura de vida, itens em chão livre e itens guardados via menu implementados e testados nos estados acima. Chefes, projéteis e recuperação de vida não. |
 | Critérios A01 a A13 em Windows e Linux | Não executados. |
