@@ -33,19 +33,20 @@ def observe(pyboy):
     game_state = mem[0xC2EE]
     if game_state == 1 or (game_state == 2 and mem[0xCD00] & 0x0E):
         return Observation("transition")
-    if game_state != 2 or not mem[1, 0xD000]:
+    if game_state != 2:
         return Observation("unknown")
+    text_state = mem[7, 0xD0C0]
+    ready = bool(mem[0xCBA0] and mem[0xCBA1] == 0 and text_state in (5, 15))
+    next_page = ready and text_state == 5
+    if not mem[1, 0xD000]:
+        mode = "dialogue" if mem[0xCBA0] else "unknown"
+        return Observation(mode, dialogue_ready=ready, dialogue_has_next_page=next_page)
     x, y = mem[1, 0xD00D], mem[1, 0xD00B]
     direction = mem[1, 0xD008]
     room = f"{mem[0xCC2D]:02x}:{mem[0xCC30]:02x}"
     mode = "playing"
-    ready = False
-    next_page = False
     if mem[0xCBA0]:
         mode = "dialogue"
-        text_state = mem[7, 0xD0C0]
-        ready = mem[0xCBA1] == 0 and text_state in (5, 15)
-        next_page = ready and text_state == 5
     elif mem[0xCC8A] or mem[0xCC57] == 8 or mem[0xCBC3]:
         mode = "locked"
     # Small rooms use a 16-byte stride for each 10-tile row. The low nibble
@@ -81,10 +82,10 @@ def candidates(observation):
 
 def execute(pyboy, action, *, render=False, hold_frames=12):
     before = observe(pyboy)
-    use_item = action == "use_b" and before.mode == "playing"
+    use_item = action in ("use_a", "use_b") and before.mode == "playing"
     if not use_item and action not in candidates(before):
         raise ValueError(f"Ação indisponível em {before.mode}: {action}")
-    key = {"interact": "a", "cancel": "b", "use_b": "b", "wait": None}.get(action, action)
+    key = {"interact": "a", "cancel": "b", "use_a": "a", "use_b": "b", "wait": None}.get(action, action)
     terrain_before = room_layout(pyboy) if use_item else None
     frames = 0
 

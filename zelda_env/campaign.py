@@ -19,6 +19,8 @@ RALPH_ENTERED_PORTAL = 0x40
 ENTER_PAST_SCENE_DONE = 0x41
 TREASURE_FLAGS = 0xC69A
 WOODEN_SWORD = 0x05
+SHOVEL = 0x15
+PAST_ROOM_FLAGS = 0xC800
 IMPA_SUBSTATE = (1, 0xD245)
 TEXT_DISPLAY_STATE = (7, 0xD0C0)
 
@@ -68,21 +70,26 @@ class Campaign:
             self.act(action)
         raise RuntimeError("A cena não terminou dentro do orçamento")
 
-    def talk(self, x, y, flag):
-        if self.pyboy.memory[LISTENERS_TALKED_TO] & flag:
-            return
+    def open_dialogue(self, x, y, accepted):
+        room = observe(self.pyboy).room
 
-        def spoken(emulator, obs):
-            if obs.room != "00:39" or abs(obs.x - x) > 20 or abs(obs.y - y) > 20:
+        def opened(emulator, obs):
+            if obs.room != room or abs(obs.x - x) > 20 or abs(obs.y - y) > 20:
                 return False
             if obs.mode == "locked":
                 obs, _, _ = execute(emulator, "wait")
-            return bool(emulator.memory[LISTENERS_TALKED_TO] & flag)
+            return obs.mode == "dialogue" and accepted(emulator)
 
-        print(f"Clareira: procurando conversa em {x},{y}", flush=True)
-        route = self.navigator.path(self.pyboy, lambda obs: False, interaction=spoken)
-        for action in route:
+        target = lambda obs: (abs(obs.x - x) + abs(obs.y - y)) / 12
+        for action in self.navigator.path(self.pyboy, lambda obs: False,
+                                          interaction=opened, toward=target):
             self.act(action)
+
+    def talk(self, x, y, flag):
+        if self.pyboy.memory[LISTENERS_TALKED_TO] & flag:
+            return
+        print(f"Clareira: procurando conversa em {x},{y}", flush=True)
+        self.open_dialogue(x, y, lambda emulator: bool(emulator.memory[LISTENERS_TALKED_TO] & flag))
         self.scene(lambda obs: obs.mode == "playing" and bool(self.pyboy.memory[LISTENERS_TALKED_TO] & flag),
                    quiet_steps=8)
 
@@ -102,7 +109,7 @@ class Campaign:
 
     def reach_lynna_city(self):
         self.go(lambda obs: obs.room == "00:68",
-                toward=lambda obs: (obs.x + abs(obs.y - 71)) / 12, cut_bushes=True)
+                toward=lambda obs: (obs.x + abs(obs.y - 71)) / 12, terrain_tools=True)
 
     def head_north_in_lynna(self):
         self.go(lambda obs: obs.room == "00:58",
@@ -133,6 +140,46 @@ class Campaign:
                 toward=lambda obs: (abs(obs.x - 40) + abs(obs.y - 40)) / 12)
         self.scene(lambda obs: obs.room == "01:39" and obs.mode == "playing"
                    and self.flag(GLOBAL_FLAGS, ENTER_PAST_SCENE_DONE), quiet_steps=8, budget=900)
+
+    def cross_past_lynna(self):
+        for room in ("01:49", "01:48", "01:58", "01:68", "01:67", "01:77"):
+            self.room(room)
+
+    def reach_black_tower(self):
+        for action in self.navigator.overland(self.pyboy, "01:75", limit=6500):
+            self.act(action)
+        self.room("01:85")
+        self.room("01:86")
+        self.open_dialogue(72, 56, lambda emulator: True)
+        self.scene(lambda obs: obs.mode == "playing"
+                   and self.pyboy.memory[PAST_ROOM_FLAGS + 0x86] & 0x80, budget=900)
+
+    def enter_black_tower(self):
+        self.room("01:76")
+        self.go(lambda obs: obs.room == "04:e7",
+                toward=lambda obs: (abs(obs.x - 80) + abs(obs.y - 71)) / 12)
+        self.go(lambda obs: obs.room == "04:e7" and obs.mode == "dialogue")
+        self.scene(lambda obs: obs.mode == "playing", quiet_steps=8)
+        self.go(lambda obs: obs.room == "04:e8",
+                toward=lambda obs: (240 - obs.x + abs(obs.y - 96)) / 12)
+
+    def get_shovel(self):
+        self.go(lambda obs: obs.room == "04:e2",
+                toward=lambda obs: (abs(obs.x - 176) + obs.y) / 12, limit=1300)
+        self.go(lambda obs: obs.room == "04:e1",
+                toward=lambda obs: (obs.x + abs(obs.y - 56)) / 12, limit=1200)
+        self.open_dialogue(72, 152, lambda emulator: True)
+        self.scene(lambda obs: obs.mode == "playing" and self.flag(TREASURE_FLAGS, SHOVEL),
+                   quiet_steps=8, budget=700)
+
+    def leave_black_tower(self):
+        exits = (("04:e2", 239, 72), ("04:e8", 176, 175), ("04:e7", 0, 96))
+        for room, x, y in exits:
+            self.go(lambda obs: obs.room == room, limit=1200,
+                    toward=lambda obs: (abs(obs.x - x) + abs(obs.y - y)) / 12)
+        self.go(lambda obs: obs.room == "04:e7" and obs.mode == "locked" and obs.y >= 165,
+                toward=lambda obs: (abs(obs.x - 120) + abs(obs.y - 170)) / 12, limit=1200)
+        self.scene(lambda obs: obs.room == "01:76" and obs.mode == "playing", quiet_steps=8)
 
     def meet_impa(self):
         self.room("00:7a")
@@ -168,6 +215,11 @@ STAGES = (
     ("10-maku-path", Campaign.enter_maku_path),
     ("11-maku-tree", Campaign.meet_maku_tree),
     ("12-passado", Campaign.enter_past),
+    ("13-lynna-village", Campaign.cross_past_lynna),
+    ("14-black-tower", Campaign.reach_black_tower),
+    ("15-black-tower-interior", Campaign.enter_black_tower),
+    ("16-pa", Campaign.get_shovel),
+    ("17-saida-da-torre", Campaign.leave_black_tower),
 )
 
 
