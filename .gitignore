@@ -1,0 +1,8 @@
+.venv/
+.cache/
+roms/
+saves/
+output/
+*.egg-info/
+__pycache__/
+.DS_Store
