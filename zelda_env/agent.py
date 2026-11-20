@@ -21,7 +21,7 @@ from pathlib import Path
 
 from . import paths
 from .__main__ import add_common, resolve_common
-from .adapter import execute, observe, room_layout, show_status
+from .adapter import enemies, execute, observe, room_layout, show_status
 from .survey import ESSENCES, HEALTH, Surveyor, progress, run_route
 
 GLOBAL_FLAGS = 0xC6D0
@@ -127,7 +127,7 @@ class Memory:
             return sum(key.startswith(prefix) for key in self.current["tried"]) >= TALKS_PER_CHARACTER
 
         def tool_use(name):
-            return name.startswith("item:") or (name.startswith("interact:") and name.endswith(":event")
+            return name.startswith("item:") or (name.startswith("interact:") and ":event" in name
                                                 and not name.startswith("interact:slot"))
 
         # A tool can act on every tile of a room. After enough tries in one area with no
@@ -271,7 +271,9 @@ class Agent:
             if obs.mode == "playing":
                 quiet += 1
                 # Scenes return to normal mode between lines while inputs are still ignored.
-                if quiet > 8 and (self.surveyor.can_move(self.pyboy) or quiet > 120):
+                # With an enemy on screen, standing still is how Link gets hit: decide sooner.
+                calm = 2 if enemies(self.pyboy) else 8
+                if quiet > calm and (self.surveyor.can_move(self.pyboy) or quiet > 120):
                     return True
             else:
                 quiet = 0

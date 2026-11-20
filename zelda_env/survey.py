@@ -401,7 +401,10 @@ class Surveyor:
                         continue  # only the tool hitting open ground; listed with the ground options
                     # The id carries what would happen now. A character with something
                     # new to say is a new option; the same line again is not.
-                    result = f"text{self._text():04x}" if opened else "event"
+                    # Two different effects on one tile (touching a chest, then opening it)
+                    # must not share a name, or the second would never be tried.
+                    change = hashlib.sha1(progress(self.shadow) + room_layout(self.shadow)).hexdigest()[:4]
+                    result = f"text{self._text():04x}" if opened else f"event{change}"
                     if opened and entity:
                         name = ENTITY_NAMES.get(entity["kind"], "the character")
                         text = f"Talk to {name} {where}"
@@ -422,24 +425,35 @@ class Surveyor:
                     break
                 if f"push:{target}:{direction}" in found:
                     continue  # already known; alignment matters, so keep probing until then
-                # Hold only as long as needed: after the object moves, Link keeps walking,
-                # and the next tile may be a pit.
-                for hold in (32, 44, 60):
-                    self._load(blocked)
-                    probe = ((direction, hold), ("wait", 30))
-                    pushed, _ = run_route(self.shadow, probe)
-                    if self._hurt_after(health - tolerance):
+                # Pushing needs Link lined up with the tile. Try as he stands, then nudged
+                # to the middle of it. Hold only as long as needed: after the object moves,
+                # Link keeps walking, and the next tile may be a pit.
+                if dx:
+                    offset, sideways = tile[1] * 16 + 8 - after.y, ("down", "up")
+                else:
+                    offset, sideways = tile[0] * 16 + 8 - after.x, ("right", "left")
+                nudges = [()]
+                if 0 < abs(offset) <= 8:
+                    nudges.append(((sideways[0] if offset > 0 else sideways[1], abs(offset)),))
+                for nudge in nudges:
+                    for hold in (32, 44, 60):
+                        self._load(blocked)
+                        probe = (*nudge, (direction, hold), ("wait", 30))
+                        pushed, _ = run_route(self.shadow, probe)
+                        if self._hurt_after(health - tolerance):
+                            break
+                        if not self._effect(entity, pushed, base_progress, base_layout):
+                            continue
+                        # Rule out things that happen anyway, such as a character walking by.
+                        self._load(blocked)
+                        idle, _ = run_route(self.shadow, (("wait", hold), ("wait", 30)))
+                        if not self._effect(entity, idle, base_progress, base_layout):
+                            add(f"push:{target}:{direction}", "push",
+                                f"Push the object {where} toward the {COMPASS[direction]}", (*step, *probe),
+                                short="Push the object")
                         break
-                    if not self._effect(entity, pushed, base_progress, base_layout):
-                        continue
-                    # Rule out things that happen anyway, such as a character walking by.
-                    self._load(blocked)
-                    idle, _ = run_route(self.shadow, (("wait", hold), ("wait", 30)))
-                    if not self._effect(entity, idle, base_progress, base_layout):
-                        add(f"push:{target}:{direction}", "push",
-                            f"Push the object {where} toward the {COMPASS[direction]}", (*step, *probe),
-                            short="Push the object")
-                    break
+                    if f"push:{target}:{direction}" in found:
+                        break
             if route and not responded:
                 # Controls that stop answering right after a walk mean a scene is about to start.
                 linger(state, route, here)
