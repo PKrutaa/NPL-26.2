@@ -76,6 +76,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Oracle of Ages US — ambiente local")
     parser.add_argument("command", choices=("play", "smoke"))
     parser.add_argument("--rom", type=rom_path, default=str(DEFAULT_ROM))
+    parser.add_argument("--observe", action="store_true", help="Telemetria no título da janela em play")
     parser.add_argument("--scale", type=int, choices=range(1, 9), default=4)
     parser.add_argument("--mute", action="store_true")
     parser.add_argument("--load-state", type=Path, help="Checkpoint PyBoy a restaurar")
@@ -119,8 +120,12 @@ def main() -> None:
             print("P: pausa | Z/X: salvar/carregar estado | Escape: sair")
             print(f"Save do jogo: {ram_path}")
             print(f"Checkpoint Z/X: {args.rom}.state")
+            if args.observe:
+                from .adapter import show_status
+
             while pyboy.tick():
-                pass
+                if args.observe and (pyboy.paused or pyboy.frame_count % 8 == 0):
+                    show_status(pyboy)
     except KeyboardInterrupt:
         pass
     finally:
