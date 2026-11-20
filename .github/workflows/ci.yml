@@ -11,6 +11,8 @@ jobs:
       matrix:
         os: [windows-latest, ubuntu-24.04, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      PYTHONUTF8: "1"  # Windows writes redirected output in the locale encoding otherwise
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
