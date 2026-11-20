@@ -13,6 +13,9 @@ A [spec de portabilidade para Windows e Linux](docs/spec-portabilidade-windows-l
 | Replay | Smoke headless confirma que a mesma sequência de inputs, repetida após restaurar um checkpoint, produz o mesmo estado serializado e os mesmos pixels. |
 | Adapter semântico | Lê sala, posição, direção, interações visíveis, quadrantes de colisão em salas pequenas e estado de diálogo. Executa ações curtas via PyBoy. |
 | Laya local | Inferência offline validada com o checkpoint clássico. Concluiu aproximação e diálogo com texto sem histórico, e travou na saída. |
+| Agente autônomo | O Laya escolhe entre opções que o emulador confirmou. Uma memória impede repetir o que já falhou. Em 150 decisões a partir do boot, recebeu a espada, falou com a Maku Tree e entrou no passado. Veja [Laya jogando sozinho](#laya-jogando-sozinho). |
+| Supervisor opcional | Um LLM pequeno e local escolhe uma opção quando o agente fica sem novidade. Desligado por padrão. Ainda sem evidência de ganho. |
+| Windows e Linux | Código preparado e testes unitários no CI. Ainda sem certificação em máquina real. Veja [Outras plataformas](#outras-plataformas). |
 
 A [validação local](docs/validation-emulator.md) registra a sessão jogável de 28 de outubro de 2026 e a repetição do smoke em 20 de novembro de 2026.
 
@@ -53,6 +56,12 @@ Outras opções:
 
 Em uma instalação nova, comece pelo boot/menu e pressione Z durante a partida para criar o primeiro checkpoint. O exemplo com `--load-state` pressupõe que esse arquivo já existe. O perfil e o checkpoint usados na validação são locais.
 
+Para ver onde ficam ROM, save, saídas e cache nesta máquina:
+
+```bash
+.venv/bin/python -m zelda_env where
+```
+
 ## Instalação reproduzível no macOS
 
 Pré-requisitos: Git, Command Line Tools da Apple, Homebrew e rede para baixar pacotes e fontes. Se `cc`/`make` estiverem ausentes, instale as ferramentas da Apple com `xcode-select --install`. Na raiz do projeto, execute o seguinte.
@@ -75,6 +84,29 @@ Alternativa sem o lock, para resolver dependências novamente:
 
 Não é necessário ativar a venv; os comandos acima chamam seu Python explicitamente. A aplicação exige Python >= 3.10, e a instalação validada usa 3.12. As bibliotecas Python ficam em `.venv/`. Homebrew instala as ferramentas nativas fora do projeto. PySDL2 também inclui uma distribuição de SDL para macOS como dependência do PyBoy.
 
+## Outras plataformas
+
+O mesmo código Python roda em Windows e Linux. Os comandos abaixo seguem a [spec de portabilidade](docs/spec-portabilidade-windows-linux.md). Eles ainda não foram executados em máquina real. O CI roda os testes unitários nos três sistemas, sem ROM e sem janela.
+
+| Operação | Windows (PowerShell) | Linux (Bash) |
+| --- | --- | --- |
+| Criar o ambiente | `py -3.12 -m venv .venv` | `python3.12 -m venv .venv` |
+| Instalar | `.\.venv\Scripts\python.exe -m pip install -r requirements.lock.txt` e depois `.\.venv\Scripts\python.exe -m pip install --no-deps -e .` | `.venv/bin/python -m pip install -r requirements.lock.txt` e depois `.venv/bin/python -m pip install --no-deps -e .` |
+| Verificar | `.\.venv\Scripts\python.exe -m zelda_env smoke --rom "C:\Games\Ages US.gbc"` | `.venv/bin/python -m zelda_env smoke --rom "/home/me/Games/Ages US.gbc"` |
+| Jogar | `Jogar.cmd` | `./jogar.sh` |
+
+No Linux, o build da ROM usa `git`, `cmake`, `gcc`, `make` e `bash`. No Windows, o script de build ainda não roda: passe uma ROM compatível com `--rom`, ou gere a ROM em Linux, macOS ou WSL2 e copie o arquivo.
+
+Sem dados no checkout, o projeto grava em pastas do usuário:
+
+| Sistema | Dados (ROM, saves, saídas) | Cache (build) |
+| --- | --- | --- |
+| Windows | `%LOCALAPPDATA%\zelda-env\data` | `%LOCALAPPDATA%\zelda-env\cache` |
+| Linux | `$XDG_DATA_HOME/zelda-env` ou `~/.local/share/zelda-env` | `$XDG_CACHE_HOME/zelda-env` ou `~/.cache/zelda-env` |
+| macOS | `~/Library/Application Support/zelda-env` | `~/Library/Caches/zelda-env` |
+
+A ordem de escolha é: `--data-dir`, depois `ZELDA_ENV_DATA_DIR`, depois as pastas `roms/`, `saves/` e `output/` que já existirem no checkout, depois a pasta do usuário. O cache usa `ZELDA_ENV_CACHE_DIR`.
+
 ## De onde vem o jogo
 
 O script `scripts/build_rom.py` baixa o [oracles-disasm público](https://github.com/Stewmath/oracles-disasm) e o assembler [WLA-DX](https://github.com/vhelin/wla-dx), fixa os commits abaixo e compila Ages em modo vanilla. Não usa um site de download de ROMs.
@@ -96,9 +128,15 @@ O jogo e os assets pertencem a Nintendo/Capcom, conforme o aviso do próprio dis
 
 São mecanismos diferentes:
 
-- **Save do cartucho:** `saves/<sha1>/battery.sav`. Guarda o progresso que o próprio jogo salvou; é carregado automaticamente na próxima execução e persistido ao encerrar. Encerrar à força pode perder alterações da sessão.
+- **Save do cartucho:** `saves/<sha1>/battery.sav`. Guarda o progresso que o próprio jogo salvou; é carregado automaticamente na próxima execução e persistido ao encerrar. Encerrar à força pode perder alterações da sessão. A gravação usa um arquivo temporário e troca atômica, então uma falha mantém o save anterior. Uma segunda janela de `play` no mesmo save é recusada.
 - **Checkpoint do emulador:** `roms/oracle-of-ages.gbc.state`, criado por Z e restaurado por X. Captura a execução completa, inclusive quando não seria possível salvar pelo menu do jogo. Para ROM externa, fica ao lado dela com sufixo `.state`.
 - **Checkpoint explícito:** `--load-state caminho` permite abrir uma cópia de outro slot. Para conservar vários, copie o `.state` com outro nome.
+
+Para trazer um save de outra pasta ou de outro computador, use `import-save`. O comando valida o tamanho, copia os bytes e guarda uma cópia `.bak` do save que estava ativo. A origem não é alterada.
+
+```bash
+.venv/bin/python -m zelda_env import-save --source /caminho/battery.sav
+```
 
 Carregar checkpoint reverte a execução. Ao sair depois disso, o save do cartucho corresponde à execução restaurada. Faça backup antes de experimentar com seu progresso. Estados completos não são intercambiáveis entre PyBoy, SameBoy e mGBA; mantenha a versão do PyBoy junto dos checkpoints.
 
@@ -127,10 +165,12 @@ Para ver frame, modo, sala, posição e direção no título, abra o emulador co
 .venv/bin/python -m zelda_env play --observe --load-state roms/oracle-of-ages.gbc.state
 ```
 
-Os experimentos partem de três checkpoints locais. O comando `prepare` deriva os três com inputs normais a partir do checkpoint Z/X do início do jogo em `00:8a`, posição `124,56`. Em outra máquina, use `--checkpoint /caminho/inicial.state` para indicar uma cópia desse ponto. Os arquivos `.state` são locais.
+Os experimentos partem de três checkpoints locais. O comando `seed` joga do boot até o primeiro ponto controlável, em `00:8a`, posição `124,56`, só com inputs de controle. Ele grava `output/inicio.state` e um `.json` com a procedência. O comando `prepare` deriva os três cenários a partir desse ponto. Os arquivos `.state` são locais.
 
 ```bash
 .venv/bin/python -m pip install -e '.[laya]'
+.venv/bin/python -m zelda_env seed
+.venv/bin/python -m zelda_env.model prepare
 .venv/bin/python -m zelda_env.benchmark prepare
 .venv/bin/python -m zelda_env.benchmark run --policy script
 .venv/bin/python -m zelda_env.benchmark run --policy random --trials 10
@@ -138,7 +178,7 @@ Os experimentos partem de três checkpoints locais. O comando `prepare` deriva o
 .venv/bin/python -m zelda_env.benchmark run --policy laya
 ```
 
-A política humana recebe a mesma observação no terminal e escolhe entre as mesmas ações. A primeira execução com Laya baixa os pesos fixados do Hugging Face. A inferência ocorre no próprio processo Python, em CPU por padrão. Com os pesos no cache, execute offline com `HF_HUB_OFFLINE=1`.
+A política humana recebe a mesma observação no terminal e escolhe entre as mesmas ações. O comando `model prepare` baixa os pesos fixados do Hugging Face e faz uma inferência de prova. É o único comando que usa a rede. Os demais carregam o Laya em modo offline e, se o cache estiver incompleto, param com a instrução de preparo. A inferência ocorre no próprio processo Python, em CPU por padrão. A opção `--device mps` só é aceita onde o PyTorch expõe esse backend.
 
 ```bash
 HF_HUB_OFFLINE=1 .venv/bin/python -m zelda_env.benchmark run --policy laya --format text
@@ -173,18 +213,66 @@ Use `--headless --directory output/campaign-verify` para validar em uma execuç�
 
 No benchmark, `--lookahead` mostra o efeito próximo de cada direção ao modelo e exclui ações que o teste no emulador confirmou estarem bloqueadas. No checkpoint da saída, o Laya deixou de colidir, mas ainda se desviou e esgotou as 12 decisões. A busca usada na campanha recebe objetivos de sala e de interação definidos à mão.
 
+## Laya jogando sozinho
+
+O modo agente não usa rotas escritas à mão. Ele parte do seed do boot e repete este ciclo:
+
+1. **Levantamento.** Uma cópia headless do emulador testa movimentos a partir do estado atual e lista o que é possível na sala: saídas, conversas, objetos que podem ser empurrados, uso de item em obstáculo e pontos que disparam uma cena.
+2. **Escolha.** O Laya escolhe uma dessas opções, com o objetivo atual no contexto. O planner converte a escolha em inputs de controle.
+3. **Memória.** Uma opção já tentada na mesma área, sem progresso na história, sai da lista. Uma conversa volta para a lista quando o personagem tem uma fala nova. Sem nada novo na sala, o agente vai para a área conhecida mais próxima que ainda tem opções.
+4. **Parada.** Quando não resta nada novo em lugar nenhum, o agente registra o impasse e para. Ele não fica repetindo a mesma ação.
+
+```bash
+.venv/bin/python -m zelda_env.agent                     # com janela
+.venv/bin/python -m zelda_env.agent --headless --decisions 300
+.venv/bin/python -m zelda_env.agent --fresh             # recomeça do seed
+```
+
+A sessão fica em `output/agent/`: `latest.state` e `memory.json` para retomar, `trace.jsonl` com uma linha por decisão e `summary.json` com o resumo. Cada decisão registra a origem: `laya`, `forced` (só havia uma opção nova), `frontier` (viagem até uma área com opções), `supervisor` ou `fallback`. O resumo traz `max_repeats_of_one_option_in_one_story_state`, que mede repetição.
+
+Os objetivos em `zelda_env/agent.py` são dicas de texto para o Laya e um teste lido da memória do jogo, como a flag da espada. Eles não contêm rotas nem coordenadas.
+
+### Supervisor opcional
+
+O supervisor é um LLM pequeno que roda no [Ollama](https://ollama.com) local. Ele é consultado quando o agente fica sem opção nova, ou depois de 20 decisões sem progresso na história. Ele recebe o objetivo, a sala, as últimas ações e a lista de opções, e devolve o id de uma opção ou `abstain`. O código rejeita JSON inválido, id fora da lista e resposta depois de 20 segundos. Nesses casos o agente segue com a recuperação própria. O limite é de duas consultas por impasse, com seis decisões de intervalo.
+
+```bash
+ollama pull qwen2.5:1.5b          # uma vez, com rede
+ollama serve                      # se o servidor não estiver rodando
+.venv/bin/python -m zelda_env.agent --supervisor qwen2.5:1.5b
+```
+
+Sem o servidor ou sem os pesos, o agente avisa e roda sem supervisor. Veja as [medições](docs/validation-agent.md).
+
+## Testes
+
+```bash
+.venv/bin/python -m pip install -e '.[dev]'
+.venv/bin/python -m pytest
+```
+
+Os testes não precisam de ROM, modelo ou janela. Eles cobrem caminhos por plataforma, validação de ROM, gravação atômica, lock de save, o contrato do supervisor e a memória do agente.
+
 ## Estrutura
 
 ```text
-zelda_env/__main__.py       CLI play/smoke e ciclo de vida do emulador
+zelda_env/__main__.py       CLI play/smoke/seed/import-save/where e ciclo de vida do emulador
+zelda_env/paths.py          Pastas de dados e cache, validação de ROM, gravação atômica e lock
 zelda_env/adapter.py        Leitura de WRAM, telemetria e ações de controle
 zelda_env/scenarios.py      Preparação e critérios de sucesso dos três cenários
 zelda_env/benchmark.py      Execução de políticas e logs de avaliação
 zelda_env/laya_policy.py    Inferência local de Choice
 zelda_env/lookahead.py      Simulação local de ações e busca de rotas
-zelda_env/campaign.py       Objetivos e checkpoints da campanha
+zelda_env/campaign.py       Objetivos e checkpoints da campanha com rotas escritas à mão
+zelda_env/survey.py         Levantamento das opções da sala na cópia headless
+zelda_env/agent.py          Agente autônomo: memória, escolha do Laya e objetivos
+zelda_env/supervisor.py     Contrato e backend do LLM supervisor
+zelda_env/model.py          Preparo e verificação offline dos pesos do Laya
+tests/                      Testes unitários sem ROM
 scripts/build_rom.py       Build fixado e verificação da ROM
 Jogar.command              Launcher do Finder no macOS
+Jogar.cmd                  Launcher do Windows
+jogar.sh                   Launcher do Linux
 requirements.lock.txt      Versões Python resolvidas na máquina validada
 docs/                      Pesquisa, arquitetura e registro de validação
 .cache/rom-build/          Fontes e build de terceiros, gerados e ignorados
@@ -198,6 +286,8 @@ A janela de jogo usa o teclado do PyBoy e avança um frame por `tick()`. O smoke
 ## Problemas comuns
 
 - **ROM ausente:** rode o script de build e espere a mensagem de hash validado.
+- **Save em uso:** outra janela de `play` está aberta com o mesmo save. Feche a outra janela.
+- **Pesos do Laya ausentes:** rode `python -m zelda_env.model prepare` uma vez, com rede.
 - **Hash incompatível:** verifique a versão. O programa aceita especificamente Ages US vanilla; não altere o hash esperado para contornar a verificação.
 - **Erro de SDL:** confirme que a venv está ativa pelo executável usado e que as dependências do lock foram instaladas. Em macOS, execute no terminal da sessão gráfica do usuário.
 - **Sem áudio ou erro do dispositivo:** use `--mute`.
@@ -207,6 +297,8 @@ A janela de jogo usa o teclado do PyBoy e avança um frame por `tick()`. O smoke
 
 ## Próximo passo
 
-Expandir a avaliação para outros pontos de partida e entender por que o Laya insiste em andar contra a parede no cenário de saída. A [proposta de arquitetura](docs/architecture-brainstorm.md) registra o desenho original. A [pesquisa sobre Oracle of Ages](docs/research-oracle-of-ages.md) reúne as referências para a leitura de memória.
+O agente chegou ao passado e à região da Black Tower sem rotas escritas à mão. Para a primeira dungeon faltam combate, leitura de HP e inventário, e uso de itens em terreno livre, como a pá. O supervisor precisa de uma avaliação em sessão completa com o prompt novo.
+
+O [ADR 0001](docs/adr/0001-agente-por-opcoes-com-memoria.md) explica como o agente funciona e o que ele não cobre. A [validação do agente](docs/validation-agent.md) traz os números e o estado de cada item da spec. A [proposta de arquitetura](docs/architecture-brainstorm.md) registra o desenho original. A [pesquisa sobre Oracle of Ages](docs/research-oracle-of-ages.md) reúne as referências para a leitura de memória.
 
 Referências: [API PyBoy](https://docs.pyboy.dk/api/pyboy.html), [controles PyBoy](https://docs.pyboy.dk/wiki/development/getting-started.html), [disassembly](https://github.com/Stewmath/oracles-disasm), [WLA-DX](https://github.com/vhelin/wla-dx).
