@@ -37,6 +37,7 @@ def agent(policy=None, supervisor=None, **options):
     made = Agent.__new__(Agent)
     made.policy, made.supervisor, made.memory = policy or Laya(), supervisor, Memory()
     made.pyboy = SimpleNamespace(memory={0xC6AA: 12, 0xC6AB: 12})
+    made.hops = 0
     made.stall, made.since_progress, made.decisions, made.recent = options.get("stall", 20), 0, 0, []
     return made
 
@@ -160,3 +161,19 @@ def test_goal_names_one_direction_that_has_an_exit():
     made.decide(OBS, node, options, "Go north or east.")
     # With no exit in either direction, the way there goes around: the goal is to explore.
     assert captured == ["Go west.", "Go to a new room."]
+
+
+def test_endless_trips_to_a_pending_area_are_cut_off():
+    made = agent()
+    here, there = [option("exit:B", "exit", "B")], [option("exit:A", "exit", "A"), option("talk:1")]
+    node, far = node_of("A", here), node_of("B", there)
+    made.memory.arrive(node, here)
+    made.memory.record(node, "exit:B")
+    made.memory.edges[node] = {"exit:B": far}
+    made.memory.current["pending"][far] = ["talk:1"]  # never clears: the record is wrong
+    origins = []
+    for _ in range(20):
+        chosen, origin, _ = made.decide(OBS, node, here, "goal")
+        made.memory.record(node, chosen.id)
+        origins.append(origin)
+    assert origins[:14] == ["frontier"] * 14 and set(origins[14:]) == {"fallback"}

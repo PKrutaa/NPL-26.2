@@ -30,6 +30,7 @@ TEXT_DISPLAY_STATE = (7, 0xD0C0)
 MEMORY_FORMAT = 6
 TALKS_PER_CHARACTER = 3
 TOOL_USES_PER_AREA = 10
+MAX_HOPS = 14  # consecutive trips to a pending area with nothing new found
 SURVEY_LEVELS = (
     {"grid": 16, "stride": 16, "limit": 400},
     {"grid": 8, "stride": 12, "limit": 700},
@@ -288,6 +289,7 @@ class Agent:
         self.empty = 0
         self.scenes = 0
         self.last = None
+        self.hops = 0
         self.damage = 0
         self.arrival = (None, None)  # (node left, option taken) for the last decision
         self.done = [item[0] for item in OBJECTIVES if item[3](pyboy)]
@@ -364,9 +366,17 @@ class Agent:
         usable = [option for option in options if (room, option.id) not in self.memory.banned]
         fresh = self.memory.fresh(room, options)
         impasse = not fresh
-        if impasse:
+        if not impasse:
+            self.hops = 0
+        else:
             first = self.memory.hop(room, options)
+            if first and self.hops >= MAX_HOPS:
+                # Travelling this long without finding anything new means the map of what
+                # is pending is wrong. Drop it, so the impasse rule takes over.
+                self.memory.current["pending"].clear()
+                first = None
             if first:
+                self.hops += 1
                 return next(option for option in usable if option.id == first), "frontier", {}
         candidates = sorted(fresh or usable, key=lambda option: len(option.route))[:12]
         if not candidates:
