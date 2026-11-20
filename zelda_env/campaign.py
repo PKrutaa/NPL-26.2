@@ -181,6 +181,25 @@ class Campaign:
                 toward=lambda obs: (abs(obs.x - 120) + abs(obs.y - 170)) / 12, limit=1200)
         self.scene(lambda obs: obs.room == "01:76" and obs.mode == "playing", quiet_steps=8)
 
+    def open_past_maku_path(self):
+        for action in self.navigator.overland(self.pyboy, "01:48", limit=6500):
+            self.act(action)
+        self.go(lambda obs: obs.room == "01:48" and 20 <= obs.x <= 28 and obs.y >= 105,
+                toward=lambda obs: (abs(obs.x - 24) + abs(obs.y - 118)) / 12)
+        self.go(lambda obs: obs.room == "04:0d", limit=700, terrain_tools=True,
+                toward=lambda obs: (abs(obs.x - 24) + abs(obs.y - 36)) / 8)
+
+    def push_maku_block(self):
+        self.go(lambda obs: obs.room == "04:0d" and obs.mode == "dialogue")
+        self.scene(lambda obs: obs.mode == "playing", quiet_steps=8)
+        self.go(lambda obs: obs.room == "04:0c", toward=lambda obs: obs.y / 12)
+        self.go(lambda obs: obs.room == "04:0c" and obs.x == 120 and 80 <= obs.y <= 85
+                and obs.facing == "up", toward=lambda obs: (abs(obs.x - 120) + abs(obs.y - 82)) / 12)
+        self.act("up", hold_frames=48)
+        self.act("wait", hold_frames=40)
+        self.go(lambda obs: obs.room == "04:0a",
+                toward=lambda obs: (obs.y + abs(obs.x - 120)) / 12)
+
     def meet_impa(self):
         self.room("00:7a")
         self.go(lambda obs: obs.room == "00:7a" and obs.mode == "playing" and obs.y <= 10)
@@ -220,6 +239,8 @@ STAGES = (
     ("15-black-tower-interior", Campaign.enter_black_tower),
     ("16-pa", Campaign.get_shovel),
     ("17-saida-da-torre", Campaign.leave_black_tower),
+    ("18-maku-path-passado", Campaign.open_past_maku_path),
+    ("19-bloco-maku", Campaign.push_maku_block),
 )
 
 
