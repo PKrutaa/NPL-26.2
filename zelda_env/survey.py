@@ -4,7 +4,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from io import BytesIO
 
-from .adapter import DIRECTIONS, execute, observe, room_layout
+from .adapter import DIRECTIONS, enemies, execute, observe, room_layout
 
 DELTA = {"up": (0, -1), "right": (1, 0), "down": (0, 1), "left": (-1, 0)}
 COMPASS = {"up": "north", "right": "east", "down": "south", "left": "west"}
@@ -24,6 +24,11 @@ ROOM_FLAGS = 0xC700  # four 256-byte tables: present, past, groups 4 and 5
 ROOM_VISITED = 0x10
 HEALTH = 0xC6AA
 TEXT_INDEX = 0xCBA2
+INVENTORY_B, INVENTORY_A = 0xC688, 0xC689
+SWORD = 0x05
+HEART = 4  # health is counted in quarter hearts
+# (frames per step, reach in pixels, steps to back away after a swing)
+TACTICS = ((6, 18, 0), (4, 22, 0), (8, 16, 0), (6, 20, 2), (4, 16, 3), (12, 22, 1))
 ESSENCES = 0xC6BF
 
 
@@ -107,7 +112,61 @@ class Surveyor:
                 return True
         return False
 
-    def options(self, pyboy, *, grid=8, limit=700):
+    def _hurt_after(self, floor, frames=40):
+        """Falls and drowning take the health a moment later. Wait before trusting it."""
+        if self.shadow.memory[HEALTH] < floor:
+            return True
+        run_route(self.shadow, (("wait", frames),))
+        return self.shadow.memory[HEALTH] < floor
+
+    def sword_action(self, pyboy):
+        if pyboy.memory[INVENTORY_A] == SWORD:
+            return "interact"  # A is the item button outside dialogue
+        return "use_b" if pyboy.memory[INVENTORY_B] == SWORD else None
+
+    def fight(self, state, action, *, max_loss, steps=90):
+        """Simulate a sword fight. Return the inputs that kill one enemy, or None.
+
+        The copy starts from the exact state of the game, so a fight that works here
+        replays the same way in the main emulator.
+        """
+        for hold, reach, retreat in TACTICS:
+            self._load(state)
+            start = observe(self.shadow)
+            count, health = len(enemies(self.shadow)), self.shadow.memory[HEALTH]
+            route, away = [], 0
+            for _ in range(steps):
+                obs = observe(self.shadow)
+                foes = enemies(self.shadow)
+                if len(foes) < count:
+                    return tuple(route), health - self.shadow.memory[HEALTH]
+                if obs.mode != "playing" or obs.room != start.room:
+                    break
+                if self.shadow.memory[HEALTH] < health - max_loss:
+                    break
+                foe = min(foes, key=lambda item: abs(item["x"] - obs.x) + abs(item["y"] - obs.y))
+                dx, dy = foe["x"] - obs.x, foe["y"] - obs.y
+                toward = ("right" if dx > 0 else "left") if abs(dx) >= abs(dy) else ("down" if dy > 0 else "up")
+                side = abs(dy) if toward in ("left", "right") else abs(dx)
+                if away:
+                    away -= 1
+                    step = ({"up": "down", "down": "up", "left": "right", "right": "left"}[toward], hold)
+                elif side > 6:
+                    # Line up on the other axis first, so the swing connects.
+                    step = (("down" if dy > 0 else "up") if toward in ("left", "right")
+                            else ("right" if dx > 0 else "left"), min(hold, side))
+                elif max(abs(dx), abs(dy)) > reach:
+                    step = (toward, hold)
+                elif obs.facing != toward:
+                    step = (toward, 2)
+                else:
+                    step = (action, 1)
+                    away = retreat
+                route.append(step)
+                execute(self.shadow, *step[:1], hold_frames=step[1])
+        return None
+
+    def options(self, pyboy, *, grid=8, limit=700, tolerance=0, stride=12):
         """Flood the room with short moves. Return one Option per distinct outcome."""
         start = observe(pyboy)
         if start.mode != "playing":
@@ -132,12 +191,27 @@ class Surveyor:
             self._load(state)
             probe = (("wait", 150),)
             waited, _ = run_route(self.shadow, probe)
-            if self.shadow.memory[HEALTH] >= health and waited.room == start.room and self._changed(
+            if self.shadow.memory[HEALTH] >= health - tolerance and waited.room == start.room and self._changed(
                     base_progress, base_layout, "playing"):
                 spot = f"text{self._text():04x}" if waited.mode == "dialogue" else f"{here.x // 32}:{here.y // 32}"
                 add(f"trigger:wait:{spot}", "trigger",
                     f"Go to the spot {bearing(start, here.x, here.y)} and wait there for something to happen",
                     (*route, *probe))
+
+        foes = enemies(pyboy)
+        sword = self.sword_action(pyboy)
+        if foes and sword:
+            # Prefer a fight without damage. Accept up to one heart while two remain after it.
+            for max_loss in (0, HEART):
+                if max_loss and health - max_loss < 2 * HEART:
+                    break
+                won = self.fight(root, sword, max_loss=max_loss)
+                if won:
+                    nearest = min(foes, key=lambda item: abs(item["x"] - start.x) + abs(item["y"] - start.y))
+                    cost = "" if not won[1] else ", taking some damage"
+                    add(f"fight:{len(foes)}:{nearest['id']:02x}", "fight",
+                        f"Attack the enemy {bearing(start, nearest['x'], nearest['y'])} with the sword{cost}", won[0])
+                    break
 
         while queue and expanded < limit:
             state, route = queue.popleft()
@@ -153,11 +227,11 @@ class Surveyor:
             for direction in DIRECTIONS:
                 self._load(state)
                 before = observe(self.shadow)
-                after, event, _ = execute(self.shadow, direction)
+                after, event, _ = execute(self.shadow, direction, hold_frames=stride)
                 responded |= event != "blocked" or after.mode != "playing"
-                step = (*route, (direction, 12))
-                if self.shadow.memory[HEALTH] < health:
-                    continue  # never plan a route that takes damage
+                step = (*route, (direction, stride))
+                if self.shadow.memory[HEALTH] < health - tolerance:
+                    continue  # do not plan a route that costs more health than allowed
                 # A scene or a slow transition hides the room for a while. Wait for it to
                 # come back before deciding whether this was an exit or an event.
                 waits = 0
@@ -208,6 +282,8 @@ class Surveyor:
                     self._load(blocked)
                     probe = ((action, 1), ("wait", 20))
                     run_route(self.shadow, probe)
+                    if self.shadow.memory[HEALTH] < health - tolerance:
+                        continue
                     if not self._changed(base_progress, base_layout, "playing"):
                         continue
                     opened = observe(self.shadow).mode == "dialogue"
@@ -230,7 +306,9 @@ class Surveyor:
                 self._load(blocked)
                 probe = ((direction, 60), ("wait", 30))
                 pushed, _ = run_route(self.shadow, probe)
-                if self._effect(entity, pushed, base_progress, base_layout):
+                # Holding a direction can walk Link into a pit or into water.
+                hurt = self._hurt_after(health - tolerance)
+                if not hurt and self._effect(entity, pushed, base_progress, base_layout):
                     # Rule out things that happen anyway, such as a character walking by.
                     self._load(blocked)
                     idle, _ = run_route(self.shadow, (("wait", 60), ("wait", 30)))

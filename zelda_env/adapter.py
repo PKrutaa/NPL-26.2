@@ -73,6 +73,25 @@ def observe(pyboy):
     )
 
 
+def enemies(pyboy):
+    """Live enemies on screen: slot, type, position and health (pinned Ages US layout)."""
+    mem = pyboy.memory
+    found = []
+    for slot, address in enumerate(range(0xD080, 0xE000, 0x100)):
+        # Bit 7 of collisionType is set while the enemy can hit and be hit.
+        if mem[1, address] and mem[1, address + 0x24] & 0x80 and mem[1, address + 0x29]:
+            x, y = mem[1, address + 0x0D], mem[1, address + 0x0B]
+            if x < 0xF0 and y < 0xF0:
+                found.append({"slot": slot, "id": mem[1, address + 1], "x": x, "y": y,
+                              "health": mem[1, address + 0x29]})
+    return found
+
+
+def health(pyboy):
+    """Link's current and maximum health, in quarter hearts."""
+    return pyboy.memory[0xC6AA], pyboy.memory[0xC6AB]
+
+
 def candidates(observation):
     if observation.mode == "playing":
         return (*DIRECTIONS, "interact", "wait")
