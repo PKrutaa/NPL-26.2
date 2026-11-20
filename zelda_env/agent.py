@@ -121,7 +121,7 @@ class Memory:
             # Some characters cycle through many lines. Three talks each are enough.
             if not option.id.startswith("interact:slot"):
                 return False
-            prefix = f"{node}|{option.id.split(':a:')[0].split(':b:')[0]}:"
+            prefix = f"{node}|{':'.join(option.id.split(':')[:2])}:"
             return sum(key.startswith(prefix) for key in self.current["tried"]) >= TALKS_PER_CHARACTER
 
         return [option for option in options

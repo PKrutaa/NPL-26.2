@@ -14,7 +14,6 @@ ENTITY_NAMES = {"Impa": "Impa", "monkey": "a monkey"}
 # Save-file fields that only change when the story advances (pinned Ages US layout).
 PROGRESS_RANGES = (
     (0xC672, 0xC682),  # small keys per dungeon
-    (0xC688, 0xC68A),  # equipped B and A items
     (0xC69A, 0xC6AA),  # obtained treasures
     (0xC6AB, 0xC6AC),  # max health
     (0xC6BF, 0xC6C0),  # essences
@@ -28,6 +27,7 @@ ESSENCES = 0xC6BF
 TEXT_INDEX = 0xCBA2
 COLLISIONS = 0xCE00  # same 16-byte row stride as the layout
 INVENTORY_B, INVENTORY_A = 0xC688, 0xC689
+STORAGE = 0xC68A  # sixteen item slots shown in the menu
 SWORD = 0x05
 HEART = 4  # health is counted in quarter hearts
 TOOL_OPTIONS = 4
@@ -74,7 +74,7 @@ def run_route(pyboy, route, *, render=False):
     """Replay a surveyed route. Stop early if the game leaves normal control."""
     after, event = observe(pyboy), "no_change"
     for action, hold in route:
-        if action != "wait" and after.mode != "playing":
+        if action != "wait" and not action.startswith("press_") and after.mode != "playing":
             break
         after, event, _ = execute(pyboy, action, render=render, hold_frames=hold)
     return after, event
@@ -131,6 +131,17 @@ class Surveyor:
             return True
         run_route(self.shadow, (("wait", frames),))
         return self.shadow.memory[HEALTH] < floor
+
+    def equip_route(self, root, item):
+        """Menu presses that put a stored item on the A button, found by trying them."""
+        for moves in range(16):
+            route = (("press_start", 60), *((("press_right", 10),) * (moves % 4)),
+                     *((("press_down", 10),) * (moves // 4)), ("press_a", 10), ("press_start", 60))
+            self._load(root)
+            run_route(self.shadow, route)
+            if self.shadow.memory[INVENTORY_A] == item and observe(self.shadow).mode == "playing":
+                return route
+        return None
 
     def sword_action(self, pyboy):
         if pyboy.memory[INVENTORY_A] == SWORD:
@@ -227,9 +238,29 @@ class Surveyor:
                     f"Go to the spot {bearing(start, here.x, here.y)} and wait there for something to happen",
                     (*route, *probe), short="Wait for the event")
 
-        tools = tuple(
-            (button, action) for button, action, address in (("a", "interact", INVENTORY_A), ("b", "use_b", INVENTORY_B))
-            if pyboy.memory[address] not in (0, SWORD))
+        # One kit per usable item: (item, button, action, menu presses to equip it first).
+        # Stored items are tried by setting the button in the copy. A real option always
+        # carries the menu presses, and is replayed from the start before it is offered.
+        kits = [(pyboy.memory[INVENTORY_A], "a", "interact", ()), (pyboy.memory[INVENTORY_B], "b", "use_b", ())]
+        for item in dict.fromkeys(pyboy.memory[STORAGE:STORAGE + 16]):
+            menu = self.equip_route(root, item) if item else None
+            if menu:
+                kits.append((item, "a", "interact", menu))
+        tools = tuple(kit for kit in kits if kit[0] not in (0, SWORD))
+
+        def wield(kit):
+            if kit[3]:
+                self.shadow.memory[INVENTORY_A] = kit[0]
+
+        def confirmed(kit, route):
+            """A stored item only counts if the whole route works with real menu presses."""
+            if not kit[3]:
+                return True
+            self._load(root)
+            run_route(self.shadow, route)
+            return not self._hurt_after(health - tolerance) and (
+                room_layout(self.shadow) != base_layout or self._changed(base_progress, base_layout, "playing"))
+
         dug = set()
         base_collisions = bytes(pyboy.memory[COLLISIONS:COLLISIONS + 0xC0])
         foes = enemies(pyboy)
@@ -307,13 +338,17 @@ class Surveyor:
                         queue.append((self._capture(), step))
                     # Items such as the shovel act on open ground. Try each kind of tile once.
                     ahead = ((after.y + dy * 16) // 16) * 16 + (after.x + dx * 16) // 16
-                    for button, action in tools:
+                    for kit in tools:
+                        item, button, action, menu = kit
+                        if not 0 <= ahead < len(base_layout):
+                            continue
                         # Solid tiles are probed one by one; open ground once per kind of tile.
-                        kind = (button, ahead) if base_collisions[ahead] else (button, base_layout[ahead])
-                        if not 0 <= ahead < len(base_layout) or kind in dug:
+                        kind = (item, ahead) if base_collisions[ahead] else (item, base_layout[ahead])
+                        if kind in dug:
                             continue
                         dug.add(kind)
                         moved_state = self._capture()
+                        wield(kit)
                         probe = ((action, 1), ("wait", 20))
                         ended, _ = run_route(self.shadow, probe)
                         layout = room_layout(self.shadow)
@@ -325,10 +360,12 @@ class Surveyor:
                             # them can be cleared one by one. An ordinary hole counts once per area.
                             opened_way = self.shadow.memory[COLLISIONS + spot] != base_collisions[spot]
                             where = f":{spot:02x}" if opened_way else ""
-                            add(f"item:{button}:{layout[spot]:02x}{where}", "interact",
-                                f"Use the {button.upper()} button item on the ground "
-                                f"{bearing(start, after.x + dx * 16, after.y + dy * 16)}",
-                                (*step, *probe), short="Use the item on the ground")
+                            full = (*menu, *step, *probe)
+                            name = f"item:{item:02x}:{layout[spot]:02x}{where}"
+                            if name not in found and confirmed(kit, full):
+                                add(name, "interact", "Use the item on the ground "
+                                    f"{bearing(start, after.x + dx * 16, after.y + dy * 16)}",
+                                    full, short="Use the item on the ground")
                         self._load(moved_state)
                     # Link slides around round characters, so a walk toward one may never block.
                     if not any(0 < (item["x"] - after.x) * dx + (item["y"] - after.y) * dy <= 26
@@ -347,8 +384,10 @@ class Surveyor:
                 entity = near[0] if near and abs(near[0]["x"] - tx) + abs(near[0]["y"] - ty) <= 20 else None
                 target = f"slot{entity['slot']}" if entity else f"{tile[0]}:{tile[1]}"
                 where = bearing(start, tx, ty)
-                for button, action in (("a", "interact"), ("b", "use_b")):
+                for kit in kits:
+                    item, button, action, menu = kit
                     self._load(blocked)
+                    wield(kit)
                     probe = ((action, 1), ("wait", 20))
                     run_route(self.shadow, probe)
                     if self.shadow.memory[HEALTH] < health - tolerance:
@@ -358,7 +397,7 @@ class Surveyor:
                     probed = observe(self.shadow)
                     opened = probed.mode == "dialogue"
                     if (event == "moved" and not opened and probed.mode == "playing"
-                            and (button, action) in tools and progress(self.shadow) == base_progress):
+                            and kit in tools and progress(self.shadow) == base_progress):
                         continue  # only the tool hitting open ground; listed with the ground options
                     # The id carries what would happen now. A character with something
                     # new to say is a new option; the same line again is not.
@@ -371,10 +410,15 @@ class Surveyor:
                     elif entity:
                         text = f"Talk to the character {where}, who reacts"
                     else:
-                        text = f"Use the {button.upper()} button item on the obstacle {where}"
+                        text = f"Use the item on the obstacle {where}"
                     brief = ("Talk to the character" if entity else "Read the sign" if opened
                              else "Use the item on the obstacle")
-                    add(f"interact:{target}:{button}:{result}", "interact", text, (*step, *probe), short=brief)
+                    full = (*menu, *step, *probe)
+# A talk is the same whatever Link holds. An item effect is named by the item.
+                    name = f"interact:{target}:{'talk' if opened else f'{item:02x}'}:{result}"
+                    if name in found or not confirmed(kit, full):
+                        continue
+                    add(name, "interact", text, full, short=brief)
                     break
                 if f"push:{target}:{direction}" in found:
                     continue  # already known; alignment matters, so keep probing until then

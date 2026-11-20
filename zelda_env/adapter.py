@@ -102,6 +102,17 @@ def candidates(observation):
 
 
 def execute(pyboy, action, *, render=False, hold_frames=12):
+    if action.startswith("press_"):
+        # A plain button press that is valid in any mode, such as the item menu.
+        # hold_frames is how long to wait after releasing.
+        pyboy.button_press(action[6:])
+        for index in range(4 + hold_frames):
+            if index == 4:
+                pyboy.button_release(action[6:])
+            if not pyboy.tick(1, render=render):
+                pyboy.button_release(action[6:])
+                raise InterruptedError("Janela do emulador encerrada")
+        return observe(pyboy), "no_change", 4 + hold_frames
     before = observe(pyboy)
     use_item = action in ("use_a", "use_b") and before.mode == "playing"
     if not use_item and action not in candidates(before):
