@@ -165,3 +165,17 @@ def test_an_option_that_opened_a_way_is_offered_again_when_the_way_closes():
     memory.unlocked(node, push.id, {"exit:N"})
     assert push not in memory.fresh(node, opened)   # the way is open: nothing to redo
     assert push in memory.fresh(node, closed)       # the room reset: push again
+
+
+def test_way_out_follows_the_known_map_and_trips_skip_other_interiors():
+    memory = Memory()
+    hall, back = exits("01:76", "04:e8"), exits("04:e7")
+    hall_node, back_node, outside = memory.area("04:e7", hall), memory.area("04:e8", back), "01:76@0"
+    memory.edges[back_node] = {"exit:04:e7": hall_node}
+    memory.edges[hall_node] = {"exit:01:76": outside, "exit:04:e8": back_node}
+    assert memory.hop(back_node, back, leaving=True) == "exit:04:e7"
+    assert memory.hop(hall_node, hall, leaving=True) == "exit:01:76"
+    # Something untried deep in this interior attracts a trip only if the room is allowed.
+    memory.current["pending"][back_node] = ["talk"]
+    assert memory.hop(hall_node, hall) == "exit:04:e8"
+    assert memory.hop(hall_node, hall, lambda room: room.startswith("01:")) is None

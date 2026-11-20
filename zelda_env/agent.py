@@ -101,6 +101,7 @@ class Memory:
         self.landmarks = {}  # objective -> which step it is on
         self.areas = {}  # room -> exit sets of its separate parts
         self.opened = {}  # "area|option" -> exits that appeared after taking it
+        self.dungeons = {}  # room -> dungeon index read when Link was there (255 outside one)
         self.decisions = 0  # carried across sessions, so a resumed trace keeps counting
         self.epoch = None
         self.current = None
@@ -215,8 +216,12 @@ class Memory:
         if option_id in pending:
             pending.remove(option_id)
 
-    def hop(self, node, options):
-        """First step of the shortest known path to an area that still has untried options."""
+    def hop(self, node, options, allowed=None, leaving=False):
+        """First step of the shortest known path to somewhere worth going.
+
+        By default that is an area with untried options, limited to rooms that pass
+        `allowed`. With `leaving`, it is any area that has a known exit to the overworld.
+        """
         available = {option.id for option in options if (node, option.id) not in self.banned}
         queue = deque((destination, option_id) for option_id, destination in self.edges.get(node, {}).items()
                       if option_id in available and destination != node)
@@ -226,7 +231,11 @@ class Memory:
             if current in seen:
                 continue
             seen.add(current)
-            if self.current["pending"].get(current):
+            room = current.split("@")[0]
+            if leaving:
+                if room[:2] in OVERWORLD:
+                    return first
+            elif self.current["pending"].get(current) and (allowed is None or allowed(room)):
                 return first
             queue.extend((destination, first) for destination in self.edges.get(current, {}).values())
         return None
@@ -234,7 +243,8 @@ class Memory:
     def dump(self):
         return {"format": MEMORY_FORMAT, "epochs": self.epochs, "edges": self.edges,
                 "banned": sorted(map(list, self.banned)), "epoch": self.epoch, "landmarks": self.landmarks,
-                "decisions": self.decisions, "areas": self.areas, "opened": self.opened}
+                "decisions": self.decisions, "areas": self.areas, "opened": self.opened,
+                "dungeons": self.dungeons}
 
     @classmethod
     def load(cls, data):
@@ -248,6 +258,7 @@ class Memory:
         memory.decisions = data.get("decisions", 0)
         memory.areas = data.get("areas", {})
         memory.opened = data.get("opened", {})
+        memory.dungeons = data.get("dungeons", {})
         memory.current = memory.epochs[memory.epoch]
         return memory
 
@@ -301,6 +312,7 @@ class Agent:
             if reached(self.pyboy):
                 continue
             # An objective can name its dungeon. In any other interior, the goal is to leave.
+            self.focus = where[0] if where else None
             if where and room and room[:2] not in OVERWORLD and self.pyboy.memory[DUNGEON_INDEX] != where[0]:
                 elsewhere = "Go outside."
             state = self.memory.landmarks.setdefault(name, {"step": 0, "arrived": False})
@@ -394,11 +406,22 @@ class Agent:
             goal = hint[:-1]
             if not any(toward(option, goal) for option in fresh):
                 fresh = [*fresh, *(option for option in ways if toward(option, goal))]
+            if hint == "Go outside." and not any(toward(option, goal) for option in fresh):
+                # The door is some rooms away. Follow the known map to it.
+                first = self.memory.hop(room, options, leaving=True)
+                if first:
+                    return next(option for option in usable if option.id == first), "route", {}
         impasse = not fresh
+        focus = getattr(self, "focus", None)
+
+        def worth_a_trip(place):
+            # While the objective is in one dungeon, other interiors do not attract trips.
+            return focus is None or place[:2] in OVERWORLD or self.memory.dungeons.get(place) == focus
+
         if not impasse:
             self.hops = 0
         else:
-            first = self.memory.hop(room, options)
+            first = self.memory.hop(room, options, worth_a_trip)
             if first and self.hops >= MAX_HOPS:
                 # Travelling this long without finding anything new means the map of what
                 # is pending is wrong. Drop it, so the impasse rule takes over.
@@ -447,6 +470,7 @@ class Agent:
             self.idle = 0
             if self.supervisor:
                 self.supervisor.progressed()
+        self.memory.dungeons[obs.room] = self.pyboy.memory[DUNGEON_INDEX]
         name, hint = self.objective(obs.room)
         started = time.perf_counter()
         # A quick pass on 16-pixel steps first. The slower passes run only when the area
