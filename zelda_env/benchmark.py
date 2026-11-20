@@ -20,7 +20,8 @@ def evaluate(pyboy, name, policy, seed, choose_laya=None):
     obs = observe(pyboy)
     initial = asdict(obs)
     trace = []
-    events = []
+    talking_to_monkey = False
+    monkey_dialogue_advanced = False
     for step in range(scenario.budget):
         choices = candidates(obs)
         start = time.perf_counter()
@@ -36,23 +37,30 @@ def evaluate(pyboy, name, policy, seed, choose_laya=None):
                 if action in choices:
                     break
         else:
-            action, details = choose_laya(scenario.goal, obs, choices, events)
+            action, details = choose_laya(scenario.goal, obs, choices, trace)
         latency = (time.perf_counter() - start) * 1000
+        before = obs
         obs, event, frames = execute(pyboy, action)
-        events.append(event)
+        if event == "dialogue_opened":
+            talking_to_monkey = action == "interact" and achieved("approach", before)
+        elif event in ("dialogue_advanced", "dialogue_closed"):
+            monkey_dialogue_advanced |= talking_to_monkey and before.dialogue_ready
+            if event == "dialogue_closed":
+                talking_to_monkey = False
         trace.append({
             "action": action, "event": event, "frames": frames, "choice_ms": round(latency, 3),
             "after": asdict(obs), **details,
         })
-        if achieved(name, obs, events):
+        if achieved(name, obs, monkey_dialogue_advanced):
             break
 
     state = io.BytesIO()
     pyboy.save_state(state)
     return {
-        "scenario": name, "policy": policy, "seed": seed, "success": achieved(name, obs, events),
+        "scenario": name, "policy": policy, "seed": seed, "success": achieved(name, obs, monkey_dialogue_advanced),
         "decisions": len(trace), "frames": sum(step["frames"] for step in trace),
-        "blocked": events.count("blocked"), "timeouts": events.count("timeout"),
+        "blocked": sum(step["event"] == "blocked" for step in trace),
+        "timeouts": sum(step["event"] == "timeout" for step in trace),
         "initial": initial, "final_state_sha256": hashlib.sha256(state.getvalue()).hexdigest(),
         "trace": trace,
     }

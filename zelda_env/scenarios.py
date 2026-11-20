@@ -21,13 +21,11 @@ SCENARIOS = {
 }
 
 
-def achieved(name, observation, events):
+def achieved(name, observation, monkey_dialogue_advanced=False):
     if name == "exit":
         return observation.room == "00:7a"
     if name == "dialogue":
-        return "dialogue_opened" in events and any(
-            event in ("dialogue_advanced", "dialogue_closed") for event in events
-        )
+        return monkey_dialogue_advanced
     if observation.room != "00:5a" or observation.mode != "playing":
         return False
     return observation.facing == "up" and any(
@@ -74,6 +72,6 @@ def prepare(pyboy, directory: Path):
 
     for action in SCENARIOS["approach"].script:
         obs, _, _ = execute(pyboy, action)
-    if not achieved("approach", obs, ()):
+    if not achieved("approach", obs):
         raise RuntimeError("O script não chegou à posição esperada para conversar")
     capture("dialogue")

@@ -11,6 +11,7 @@ dependencies = ["pyboy==2.8.1", "Pillow==13.0.0"]
 
 [project.optional-dependencies]
 build-rom = ["PyYAML==6.0.3"]
+laya = ["laya==0.5.0"]
 
 [project.scripts]
 zelda-env = "zelda_env.__main__:main"
