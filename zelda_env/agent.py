@@ -331,9 +331,17 @@ class Agent:
         # has nothing new, or still owes an option that only they can route to.
         options = self.surveyor.options(self.pyboy, **SURVEY_LEVELS[0])
         node = node_of(obs.room, options)
+        # Record the arrival first: it marks the way back as known, and the decision to
+        # look deeper must not count that exit as something new.
+        self.memory.arrive(node, options, *self.arrival)
+        self.arrival = (None, None)
         depth = self.memory.current.setdefault("depth", {})
         level = 0
-        while level < len(SURVEY_LEVELS) - 1 and not self.memory.fresh(node, options):
+        # An area with a single way out looks like a dead end. Narrow exits are what the
+        # quick pass misses, so look closer once before accepting that.
+        dead_end = sum(option.kind == "exit" for option in options) <= 1 and not depth.get(node)
+        while level < len(SURVEY_LEVELS) - 1 and (dead_end or not self.memory.fresh(node, options)):
+            dead_end = False
             found = {option.id for option in options}
             owed = [item for item in self.memory.current["pending"].get(node, []) if item not in found]
             if depth.get(node, 0) > level and not owed:
@@ -354,8 +362,7 @@ class Agent:
             self.scenes += 1
             self.write({"event": "scene", "room": obs.room, "id": scene.id})
             return True
-        self.memory.arrive(node, options, *self.arrival)
-        self.arrival = (None, None)
+        self.memory.arrive(node, options)
         started = time.perf_counter()
         option, origin, details = self.decide(obs, node, options, hint)
         choice_seconds = time.perf_counter() - started
