@@ -14,6 +14,9 @@ CUTSCENE_PHASE = 0xCFD0
 LISTENERS_TALKED_TO = 0xCFDE
 GLOBAL_FLAGS = 0xC6D0
 INTRO_DONE = 0x0A
+MET_MAKU_TREE = 0x0C
+RALPH_ENTERED_PORTAL = 0x40
+ENTER_PAST_SCENE_DONE = 0x41
 TREASURE_FLAGS = 0xC69A
 WOODEN_SWORD = 0x05
 IMPA_SUBSTATE = (1, 0xD245)
@@ -101,6 +104,36 @@ class Campaign:
         self.go(lambda obs: obs.room == "00:68",
                 toward=lambda obs: (obs.x + abs(obs.y - 71)) / 12, cut_bushes=True)
 
+    def head_north_in_lynna(self):
+        self.go(lambda obs: obs.room == "00:58",
+                toward=lambda obs: (abs(obs.x - 20) + obs.y) / 12)
+        self.room("00:48")
+
+    def enter_maku_path(self):
+        self.go(lambda obs: obs.room == "04:04",
+                toward=lambda obs: (abs(obs.x - 24) + abs(obs.y - 36)) / 12)
+        self.go(lambda obs: obs.room == "04:04" and obs.mode == "dialogue")
+        self.scene(lambda obs: obs.mode == "playing", quiet_steps=8)
+        self.go(lambda obs: obs.room == "04:03", toward=lambda obs: obs.y / 12)
+
+    def meet_maku_tree(self):
+        for room in ("04:02", "04:01", "00:38"):
+            self.go(lambda obs: obs.room == room,
+                    toward=lambda obs: (obs.y + abs(obs.x - 120)) / 12)
+        self.scene(lambda obs: obs.mode == "playing" and self.flag(GLOBAL_FLAGS, MET_MAKU_TREE),
+                   quiet_steps=8)
+
+    def enter_past(self):
+        self.go(lambda obs: obs.room == "00:39",
+                toward=lambda obs: (160 - obs.x + abs(obs.y - 53)) / 12)
+        self.scene(lambda obs: obs.mode == "playing" and self.flag(GLOBAL_FLAGS, RALPH_ENTERED_PORTAL),
+                   quiet_steps=8)
+        self.go(lambda obs: obs.room == "00:39" and obs.mode == "locked"
+                and abs(obs.x - 40) <= 8 and abs(obs.y - 40) <= 8,
+                toward=lambda obs: (abs(obs.x - 40) + abs(obs.y - 40)) / 12)
+        self.scene(lambda obs: obs.room == "01:39" and obs.mode == "playing"
+                   and self.flag(GLOBAL_FLAGS, ENTER_PAST_SCENE_DONE), quiet_steps=8, budget=900)
+
     def meet_impa(self):
         self.room("00:7a")
         self.go(lambda obs: obs.room == "00:7a" and obs.mode == "playing" and obs.y <= 10)
@@ -131,6 +164,10 @@ STAGES = (
     ("06-nayru", Campaign.clear_nayru_scene),
     ("07-saida-da-floresta", Campaign.leave_forest),
     ("08-lynna-city", Campaign.reach_lynna_city),
+    ("09-norte-da-cidade", Campaign.head_north_in_lynna),
+    ("10-maku-path", Campaign.enter_maku_path),
+    ("11-maku-tree", Campaign.meet_maku_tree),
+    ("12-passado", Campaign.enter_past),
 )
 
 

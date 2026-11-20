@@ -30,10 +30,11 @@ def observe(pyboy):
     mem = pyboy.memory
     if mem[0xCBCB]:
         return Observation("menu")
-    if mem[0xC2EE] != 2 or not mem[1, 0xD000]:
-        return Observation("unknown")
-    if mem[0xCD00] & 0x0E:
+    game_state = mem[0xC2EE]
+    if game_state == 1 or (game_state == 2 and mem[0xCD00] & 0x0E):
         return Observation("transition")
+    if game_state != 2 or not mem[1, 0xD000]:
+        return Observation("unknown")
     x, y = mem[1, 0xD00D], mem[1, 0xD00B]
     direction = mem[1, 0xD008]
     room = f"{mem[0xCC2D]:02x}:{mem[0xCC30]:02x}"

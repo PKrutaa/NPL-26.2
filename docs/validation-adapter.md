@@ -31,3 +31,9 @@ XY são pixels locais. O leitor reconhece os slots de interação com sprite vis
 ## Recuperação após bloqueios
 
 Com o mesmo modelo, checkpoint e limite de 12 decisões, a exploração após dois movimentos bloqueados chegou à saída em 7 de 10 sementes. A semente 0 concluiu em 11 decisões e 182 frames. A política original repetiu direita nas 12 decisões e terminou sem sair. A exploração escolhe entre direções que não acabaram de falhar e mantém a direção sorteada por até cinco ações enquanto houver movimento. O modo `--watch` varia a semente a cada volta. A comparação ainda se limita ao mesmo checkpoint.
+
+## Ensaio de campanha com checkpoints persistentes
+
+Na janela SDL2, Link saiu do checkpoint inicial, encontrou Impa, moveu a pedra, atravessou a introdução e recebeu a espada. Usou a espada para cortar o arbusto no caminho até Lynna City, atravessou Maku Path, falou com a Maku Tree e seguiu Ralph pelo portal para o passado. A execução salvou o marco `12-passado.state` em `01:39`, XY 40,40. A campanha é uma combinação de objetivos escritos à mão, busca em cópias locais do emulador e Choice do Laya nos diálogos. Os estados da busca são descartados. Os marcos são gerados por inputs no emulador principal.
+
+A checagem de uma jogada por direção no benchmark de saída eliminou as colisões, mas o modelo continuou sem concluir no orçamento de 12 decisões. O checkpoint da campanha comprova progresso no jogo até o portal. A execução ainda não chegou às essências ou aos créditos.
