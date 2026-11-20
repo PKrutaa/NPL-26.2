@@ -1,5 +1,6 @@
 """Discover what Link can do in the current room by trying inputs in a headless copy."""
 
+import hashlib
 from collections import deque
 from dataclasses import dataclass, field
 from io import BytesIO
@@ -23,13 +24,22 @@ PROGRESS_RANGES = (
 ROOM_FLAGS = 0xC700  # four 256-byte tables: present, past, groups 4 and 5
 ROOM_VISITED = 0x10
 HEALTH = 0xC6AA
+ESSENCES = 0xC6BF
 TEXT_INDEX = 0xCBA2
+COLLISIONS = 0xCE00  # same 16-byte row stride as the layout
 INVENTORY_B, INVENTORY_A = 0xC688, 0xC689
 SWORD = 0x05
 HEART = 4  # health is counted in quarter hearts
-# (frames per step, reach in pixels, steps to back away after a swing)
-TACTICS = ((6, 18, 0), (4, 22, 0), (8, 16, 0), (6, 20, 2), (4, 16, 3), (12, 22, 1))
-ESSENCES = 0xC6BF
+# (frames per step, reach in pixels, steps to back away after a swing, style, detour side)
+# "chase" walks to the enemy and steps around what blocks the way. "ambush" stands still,
+# turns toward the enemy and swings when it comes close: it suits enemies that fly in.
+TACTICS = (
+    (6, 18, 0, "chase", 1), (4, 22, 0, "chase", -1), (8, 16, 0, "chase", 1), (6, 20, 2, "chase", -1),
+    (6, 22, 0, "ambush", 1), (4, 26, 0, "ambush", 1), (4, 16, 3, "chase", 1), (12, 22, 1, "chase", -1),
+    (8, 30, 0, "ambush", 1),
+)
+OPPOSITE = {"up": "down", "down": "up", "left": "right", "right": "left"}
+TURN = {"up": ("left", "right"), "down": ("right", "left"), "left": ("down", "up"), "right": ("up", "down")}
 
 
 def progress(pyboy):
@@ -75,6 +85,7 @@ class Surveyor:
 
         self.shadow = PyBoy(str(rom), window="null", ram_file=BytesIO(bytes(8192)), sound_volume=0)
         self.shadow.set_emulation_speed(0)
+        self.volatile = False
 
     def close(self):
         self.shadow.stop(save=False)
@@ -91,7 +102,7 @@ class Surveyor:
         """Did the last probe do anything other than bump into a wall?"""
         obs = observe(self.shadow)
         return (obs.mode != before_mode or progress(self.shadow) != before_progress
-                or room_layout(self.shadow) != before_layout)
+                or (not self.volatile and room_layout(self.shadow) != before_layout))
 
     def _text(self):
         return self.shadow.memory[TEXT_INDEX] | self.shadow.memory[TEXT_INDEX + 1] << 8
@@ -125,46 +136,56 @@ class Surveyor:
             return "interact"  # A is the item button outside dialogue
         return "use_b" if pyboy.memory[INVENTORY_B] == SWORD else None
 
-    def fight(self, state, action, *, max_loss, steps=90):
+    def fight(self, state, action, *, max_loss, steps=160):
         """Simulate a sword fight. Return the inputs that kill one enemy, or None.
 
         The copy starts from the exact state of the game, so a fight that works here
         replays the same way in the main emulator.
         """
-        for hold, reach, retreat in TACTICS:
+        for hold, reach, retreat, style, side_sign in TACTICS:
             self._load(state)
             start = observe(self.shadow)
             count, health = len(enemies(self.shadow)), self.shadow.memory[HEALTH]
-            route, away = [], 0
+            route, away, detour, previous = [], 0, 0, None
             for _ in range(steps):
                 obs = observe(self.shadow)
                 foes = enemies(self.shadow)
+                if obs.mode != "playing" or obs.room != start.room:
+                    break  # leaving the room also empties the enemy list; that is not a win
                 if len(foes) < count:
                     return tuple(route), health - self.shadow.memory[HEALTH]
-                if obs.mode != "playing" or obs.room != start.room:
-                    break
                 if self.shadow.memory[HEALTH] < health - max_loss:
                     break
                 foe = min(foes, key=lambda item: abs(item["x"] - obs.x) + abs(item["y"] - obs.y))
                 dx, dy = foe["x"] - obs.x, foe["y"] - obs.y
                 toward = ("right" if dx > 0 else "left") if abs(dx) >= abs(dy) else ("down" if dy > 0 else "up")
                 side = abs(dy) if toward in ("left", "right") else abs(dx)
+                close = max(abs(dx), abs(dy)) <= reach and side <= 10
+                stuck = previous is not None and previous == (obs.x, obs.y, "move")
+                if stuck and not detour:
+                    detour = 3  # something is in the way: step around it
+                moving = True
                 if away:
                     away -= 1
-                    step = ({"up": "down", "down": "up", "left": "right", "right": "left"}[toward], hold)
+                    step = (OPPOSITE[toward], hold)
+                elif close and obs.facing == toward:
+                    step, moving, away = (action, 1), False, retreat
+                elif close:
+                    step, moving = (toward, 2), False
+                elif style == "ambush":
+                    step, moving = ("wait", hold), False
+                elif detour:
+                    detour -= 1
+                    step = (TURN[toward][0 if side_sign > 0 else 1], hold)
                 elif side > 6:
                     # Line up on the other axis first, so the swing connects.
                     step = (("down" if dy > 0 else "up") if toward in ("left", "right")
                             else ("right" if dx > 0 else "left"), min(hold, side))
-                elif max(abs(dx), abs(dy)) > reach:
-                    step = (toward, hold)
-                elif obs.facing != toward:
-                    step = (toward, 2)
                 else:
-                    step = (action, 1)
-                    away = retreat
+                    step = (toward, hold)
+                previous = (obs.x, obs.y, "move" if moving else "act")
                 route.append(step)
-                execute(self.shadow, *step[:1], hold_frames=step[1])
+                execute(self.shadow, step[0], hold_frames=step[1])
         return None
 
     def options(self, pyboy, *, grid=8, limit=700, tolerance=0, stride=12):
@@ -176,6 +197,10 @@ class Surveyor:
         pyboy.save_state(stream)
         root = stream.getvalue()
         base_progress, base_layout = progress(pyboy), room_layout(pyboy)
+        # Some rooms change their tiles by themselves. There, a changed tile proves nothing.
+        self._load(root)
+        run_route(self.shadow, (("wait", 30),))
+        self.volatile = room_layout(self.shadow) != base_layout
         health = pyboy.memory[HEALTH]
         found = {}
         poked = set()
@@ -194,11 +219,18 @@ class Surveyor:
             waited, _ = run_route(self.shadow, probe)
             if self.shadow.memory[HEALTH] >= health - tolerance and waited.room == start.room and self._changed(
                     base_progress, base_layout, "playing"):
-                spot = f"text{self._text():04x}" if waited.mode == "dialogue" else f"{here.x // 32}:{here.y // 32}"
+                # Named by the effect, so one event seen from many spots is one option.
+                effect = hashlib.sha1(progress(self.shadow) + waited.mode.encode()).hexdigest()[:6]
+                spot = f"text{self._text():04x}" if waited.mode == "dialogue" else effect
                 add(f"trigger:wait:{spot}", "trigger",
                     f"Go to the spot {bearing(start, here.x, here.y)} and wait there for something to happen",
                     (*route, *probe), short="Wait for the event")
 
+        tools = tuple(
+            (button, action) for button, action, address in (("a", "interact", INVENTORY_A), ("b", "use_b", INVENTORY_B))
+            if pyboy.memory[address] not in (0, SWORD))
+        dug = set()
+        base_collisions = bytes(pyboy.memory[COLLISIONS:COLLISIONS + 0xC0])
         foes = enemies(pyboy)
         sword = self.sword_action(pyboy)
         if foes and sword:
@@ -266,6 +298,31 @@ class Surveyor:
                     if key not in seen:
                         seen.add(key)
                         queue.append((self._capture(), step))
+                    # Items such as the shovel act on open ground. Try each kind of tile once.
+                    ahead = ((after.y + dy * 16) // 16) * 16 + (after.x + dx * 16) // 16
+                    for button, action in tools:
+                        # Solid tiles are probed one by one; open ground once per kind of tile.
+                        kind = (button, ahead) if base_collisions[ahead] else (button, base_layout[ahead])
+                        if not 0 <= ahead < len(base_layout) or kind in dug:
+                            continue
+                        dug.add(kind)
+                        moved_state = self._capture()
+                        probe = ((action, 1), ("wait", 20))
+                        ended, _ = run_route(self.shadow, probe)
+                        layout = room_layout(self.shadow)
+                        if (not self.volatile and layout != base_layout and ended.mode == "playing"
+                                and self.shadow.memory[HEALTH] >= health - tolerance):
+                            spot = ahead if layout[ahead] != base_layout[ahead] else next(
+                                index for index in range(len(layout)) if layout[index] != base_layout[index])
+                            # A dig that opens a blocked tile is named by the tile, so a row of
+                            # them can be cleared one by one. An ordinary hole counts once per area.
+                            opened_way = self.shadow.memory[COLLISIONS + spot] != base_collisions[spot]
+                            where = f":{spot:02x}" if opened_way else ""
+                            add(f"item:{button}:{layout[spot]:02x}{where}", "interact",
+                                f"Use the {button.upper()} button item on the ground "
+                                f"{bearing(start, after.x + dx * 16, after.y + dy * 16)}",
+                                (*step, *probe), short="Use the item on the ground")
+                        self._load(moved_state)
                     # Link slides around round characters, so a walk toward one may never block.
                     if not any(0 < (item["x"] - after.x) * dx + (item["y"] - after.y) * dy <= 26
                                and abs((item["x"] - after.x) * dy) + abs((item["y"] - after.y) * dx) <= 10
@@ -291,7 +348,11 @@ class Surveyor:
                         continue
                     if not self._changed(base_progress, base_layout, "playing"):
                         continue
-                    opened = observe(self.shadow).mode == "dialogue"
+                    probed = observe(self.shadow)
+                    opened = probed.mode == "dialogue"
+                    if (event == "moved" and not opened and probed.mode == "playing"
+                            and (button, action) in tools and progress(self.shadow) == base_progress):
+                        continue  # only the tool hitting open ground; listed with the ground options
                     # The id carries what would happen now. A character with something
                     # new to say is a new option; the same line again is not.
                     result = f"text{self._text():04x}" if opened else "event"

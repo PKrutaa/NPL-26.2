@@ -52,15 +52,17 @@ OBJECTIVES = (
     ("maku-tree", (("00:68", None), ("00:48", "Enter the door or stairs."), ("00:38", "Talk to the character.")),
      "Go north.", _flag(GLOBAL_FLAGS, 0x0C)),
     ("passado", (("00:39", "Walk into the event."),), "Go south.", _flag(GLOBAL_FLAGS, 0x41)),
-    ("pa", (("01:76", "Enter the door or stairs."),), "Talk to the character.", _flag(TREASURES, 0x15)),
-    ("maku-tree-salva", (("01:48", "Use the item on the obstacle."),), "Go north.", _flag(GLOBAL_FLAGS, 0x12)),
+    ("pa", (("01:76", "Enter the door or stairs."),), "Go to a new room or talk to the character.",
+     _flag(TREASURES, 0x15)),
+    ("maku-tree-salva", (("01:48", "Use the item on the ground."),), "Go to a new room.",
+     _flag(GLOBAL_FLAGS, 0x12)),
     ("chave-do-cemiterio", (("01:39", "Walk into the event."), ("00:38", "Talk to the character."),
                             ("00:7c", "Enter the door or stairs.")),
      "Enter the door or stairs.", _flag(TREASURES, 0x42)),
     ("dungeon-1", (("00:8d", "Enter the door or stairs."),), "Enter the door or stairs.",
      lambda pyboy: bool(pyboy.memory[GROUP4_ROOM_FLAGS + 0x24] & ROOM_VISITED)),
-    ("essencia-1", (), "Attack the enemy.", lambda pyboy: bool(pyboy.memory[ESSENCES] & 1)),
-    ("oito-essencias", (), "Explore.", lambda pyboy: pyboy.memory[ESSENCES] == 0xFF),
+    ("essencia-1", (), "Go to a new room.", lambda pyboy: bool(pyboy.memory[ESSENCES] & 1)),
+    ("oito-essencias", (), "Go to a new room.", lambda pyboy: pyboy.memory[ESSENCES] == 0xFF),
 )
 
 
@@ -279,7 +281,7 @@ class Agent:
             first = self.memory.hop(room, options)
             if first:
                 return next(option for option in usable if option.id == first), "frontier", {}
-        candidates = sorted(fresh or usable, key=lambda option: len(option.route))[:8]
+        candidates = sorted(fresh or usable, key=lambda option: len(option.route))[:12]
         if not candidates:
             return None, "none", {}
         context = self.context(obs, hint)
@@ -300,8 +302,15 @@ class Agent:
             return candidates[0], "forced", details
         keys = {f"option_{index + 1}": option for index, option in enumerate(candidates)}
         # Laya matches short text well and long text at chance, so it gets only the goal.
-        key, laya = self.policy.choose({"goal": hint}, {key: option.short or option.description
-                                                         for key, option in keys.items()})
+        seen = {name.split("@")[0] for name in self.memory.current["visited"]}
+
+        def brief(option):
+            text = option.short or option.description
+            # An exit to a room not seen in this story state says so: goals can ask for it.
+            fresh_room = option.kind == "exit" and option.destination not in seen
+            return f"{text} to a new room" if fresh_room and text.startswith("Go ") else text
+
+        key, laya = self.policy.choose({"goal": hint}, {key: brief(option) for key, option in keys.items()})
         # The origin names who chose, so a comparison run is never attributed to Laya.
         return keys[key], getattr(self, "label", "laya"), {**details, "laya": laya}
 

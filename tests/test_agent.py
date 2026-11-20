@@ -128,7 +128,11 @@ def test_laya_reads_only_the_short_goal_and_short_options():
     node = node_of("A", options)
     made.memory.arrive(node, options)
     made.decide(OBS, node, options, "Go north.")
-    assert set(made.policy.asked[0].values()) == {"Go north", "Talk to the character"}
+    assert set(made.policy.asked[0].values()) == {"Go north to a new room", "Talk to the character"}
+    # Once the room on the other side is known, the exit stops saying it is new.
+    made.memory.arrive(node_of("B", []), [])
+    made.decide(OBS, node, options, "Go north.")
+    assert set(made.policy.asked[1].values()) == {"Go north", "Talk to the character"}
 
 
 def test_goal_follows_the_steps_of_the_objective():
