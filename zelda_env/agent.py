@@ -21,7 +21,7 @@ from pathlib import Path
 
 from . import paths
 from .__main__ import add_common, resolve_common
-from .adapter import execute, observe, show_status
+from .adapter import execute, observe, room_layout, show_status
 from .survey import ESSENCES, HEALTH, Surveyor, progress, run_route
 
 GLOBAL_FLAGS = 0xC6D0
@@ -354,19 +354,23 @@ class Agent:
         self.arrival = (None, None)
         depth = self.memory.current.setdefault("depth", {})
         level = 0
+        # How closely an area was examined holds only while its terrain is the same:
+        # a door that opens after a fight must be looked for again.
+        terrain = bytes(self.pyboy.memory[0xCE00:0xCEC0]) + room_layout(self.pyboy)
+        examined = f"{node}#{hashlib.sha1(terrain).hexdigest()[:8]}"
         # An area with a single way out looks like a dead end. Narrow exits are what the
         # quick pass misses, so look closer once before accepting that.
-        dead_end = sum(option.kind == "exit" for option in options) <= 1 and not depth.get(node)
+        dead_end = sum(option.kind == "exit" for option in options) <= 1 and not depth.get(examined)
         while level < len(SURVEY_LEVELS) - 1 and (dead_end or not self.memory.fresh(node, options)):
             dead_end = False
             found = {option.id for option in options}
             owed = [item for item in self.memory.current["pending"].get(node, []) if item not in found]
-            if depth.get(node, 0) > level and not owed:
+            if depth.get(examined, 0) > level and not owed:
                 break  # the deeper passes already ran here and left nothing to do
             if level == len(SURVEY_LEVELS) - 2 and not owed and self.memory.hop(node, options):
                 break  # the finest pass is slow: keep it for when no other area has options
             level += 1
-            depth[node] = max(depth.get(node, 0), level)
+            depth[examined] = max(depth.get(examined, 0), level)
             options += [option for option in self.surveyor.options(self.pyboy, **SURVEY_LEVELS[level])
                         if option.id not in found]
         survey_seconds = time.perf_counter() - started

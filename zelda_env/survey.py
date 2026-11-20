@@ -295,6 +295,12 @@ class Surveyor:
                     continue
                 dx, dy = DELTA[direction]
                 if event == "moved":
+                    if progress(self.shadow) != base_progress:
+                        # Walking here changed the save data: a key or another item was picked up.
+                        effect = hashlib.sha1(progress(self.shadow)).hexdigest()[:6]
+                        add(f"collect:{effect}", "trigger",
+                            f"Pick up the item {bearing(start, after.x, after.y)}", step, short="Pick up the item")
+                        continue
                     key = (after.x // grid, after.y // grid)
                     if key not in seen:
                         seen.add(key)
