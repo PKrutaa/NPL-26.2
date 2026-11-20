@@ -1,0 +1,41 @@
+# Fast checks that need no ROM, no model and no display.
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  base:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-24.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the base profile
+        run: |
+          python -m pip install --only-binary=:all: -r requirements.lock.txt
+          python -m pip install --no-deps -e .
+          python -m pip install pytest
+          python -m pip check
+      - name: Compile and show help
+        run: |
+          python -m compileall -q zelda_env scripts tests
+          python -m zelda_env --help
+          python -m zelda_env.benchmark --help
+          python -m zelda_env.campaign --help
+          python -m zelda_env.agent --help
+          python -m zelda_env.model --help
+          python -m zelda_env where
+      - name: Unit tests
+        run: python -m pytest -q
+      - name: A missing ROM fails with a clear message
+        shell: bash
+        run: |
+          set +e
+          python -m zelda_env smoke --rom "pasta com espaço/não existe.gbc" 2> error.txt
+          test $? -eq 2 && grep -q "ROM não encontrada" error.txt
