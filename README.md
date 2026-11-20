@@ -2,6 +2,8 @@
 
 O projeto usa o PyBoy para rodar Oracle of Ages US, permitir controle humano e preparar experimentos de controle por agentes.
 
+A [spec de portabilidade para Windows e Linux](docs/spec-portabilidade-windows-linux.md) detalha a migração proposta, a matriz de suporte e os critérios de aceitação.
+
 ## Estado atual
 
 | Parte | Estado |
