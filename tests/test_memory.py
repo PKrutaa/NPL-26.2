@@ -128,3 +128,13 @@ def test_tool_uses_in_one_area_run_out():
         assert option in memory.fresh(node, [*digs, door])
         memory.record(node, option.id)
     assert memory.fresh(node, [*digs, door]) == [door]
+
+
+def test_surveys_that_share_an_exit_are_the_same_area():
+    memory = Memory()
+    first = memory.area("A", exits("B"))
+    assert memory.area("A", exits("B", "C")) == first  # a closer look found one more exit
+    assert memory.area("A", exits("C")) == first
+    other = memory.area("A", exits("D"))  # no exit in common: another part of the room
+    assert other != first
+    assert Memory.load(json.loads(json.dumps(memory.dump()))).area("A", exits("D")) == other

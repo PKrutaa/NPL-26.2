@@ -30,6 +30,7 @@ INVENTORY_B, INVENTORY_A = 0xC688, 0xC689
 STORAGE = 0xC68A  # sixteen item slots shown in the menu
 SWORD = 0x05
 HEART = 4  # health is counted in quarter hearts
+OVERWORLD = ("00", "01")  # present and past; other groups are interiors and dungeons
 TOOL_OPTIONS = 4
 # (frames per step, reach in pixels, steps to back away after a swing, style, detour side)
 # "chase" walks to the enemy and steps around what blocks the way. "ambush" stands still,
@@ -124,6 +125,29 @@ class Surveyor:
             if event in ("moved", "room_changed") or after.mode != "playing":
                 return True
         return False
+
+    def _pushed(self, entity, after, base_progress, base_layout):
+        """A push moved something: a tile, a character, or the save data.
+
+        Leaving normal control alone only counts against a character. Against plain
+        terrain it is some other event that walking there would also start.
+        """
+        if progress(self.shadow) != base_progress:
+            return True
+        if not self.volatile and room_layout(self.shadow) != base_layout:
+            return True
+        return bool(entity) and self._effect(entity, after, base_progress, base_layout)
+
+    def _effect_name(self, base_progress, base_layout):
+        """A short, stable name for what a probe did: new save data, or how one tile changed."""
+        after = progress(self.shadow)
+        if after != base_progress:
+            return hashlib.sha1(after).hexdigest()[:4]
+        layout = room_layout(self.shadow)
+        for index, tile in enumerate(layout):
+            if tile != base_layout[index]:
+                return f"{base_layout[index]:02x}{tile:02x}"
+        return observe(self.shadow).mode[:4]
 
     def _hurt_after(self, floor, frames=40):
         """Falls and drowning take the health a moment later. Wait before trusting it."""
@@ -262,6 +286,7 @@ class Surveyor:
                 room_layout(self.shadow) != base_layout or self._changed(base_progress, base_layout, "playing"))
 
         dug = set()
+        push_tries = {}
         base_collisions = bytes(pyboy.memory[COLLISIONS:COLLISIONS + 0xC0])
         foes = enemies(pyboy)
         sword = self.sword_action(pyboy)
@@ -301,9 +326,17 @@ class Surveyor:
                 # A scene or a slow transition hides the room for a while. Wait for it to
                 # come back before deciding whether this was an exit or an event.
                 waits = 0
-                while after.room is None and waits < 40:
+                while after.room is None and waits < 90:
                     after, _, _ = execute(self.shadow, "wait")
                     waits += 1
+                # Walking out of a door keeps Link out of control for a moment in the old
+                # room before the new one loads. Let that finish, so it is seen as an exit.
+                while after.room == start.room and after.mode in ("transition", "locked", "unknown") and waits < 60:
+                    after, _, _ = execute(self.shadow, "wait")
+                    waits += 1
+                    while after.room is None and waits < 90:
+                        after, _, _ = execute(self.shadow, "wait")
+                        waits += 1
                 step = (*step, *((("wait", 12),) * waits))
                 if after.room is None:
                     add(f"trigger:{after.mode}:{direction}", "trigger",
@@ -315,7 +348,9 @@ class Surveyor:
                     where = (f"the {COMPASS[direction]} edge of this screen" if same_map
                              else f"the doorway or stairs {bearing(start, before.x, before.y)}")
                     add(f"exit:{after.room}", "exit", f"Leave through {where}", step, after.room,
-                        short=f"Go {COMPASS[direction]}" if same_map else "Enter the door or stairs")
+                        short=(f"Go {COMPASS[direction]}" if same_map else
+                               "Go outside" if after.room[:2] in OVERWORLD and start.room[:2] not in OVERWORLD
+                               else "Enter the door or stairs"))
                     continue
                 if after.mode != "playing":
                     # One option per event: a line of trigger tiles is a single thing to do.
@@ -367,8 +402,10 @@ class Surveyor:
                                     f"{bearing(start, after.x + dx * 16, after.y + dy * 16)}",
                                     full, short="Use the item on the ground")
                         self._load(moved_state)
+                    # A step cut short stopped against something: probe it like a blocked step.
+                    cut_short = abs(after.x - before.x) + abs(after.y - before.y) < stride - 2
                     # Link slides around round characters, so a walk toward one may never block.
-                    if not any(0 < (item["x"] - after.x) * dx + (item["y"] - after.y) * dy <= 26
+                    if not cut_short and not any(0 < (item["x"] - after.x) * dx + (item["y"] - after.y) * dy <= 26
                                and abs((item["x"] - after.x) * dy) + abs((item["y"] - after.y) * dx) <= 10
                                for item in after.entities):
                         continue
@@ -403,8 +440,7 @@ class Surveyor:
                     # new to say is a new option; the same line again is not.
                     # Two different effects on one tile (touching a chest, then opening it)
                     # must not share a name, or the second would never be tried.
-                    change = hashlib.sha1(progress(self.shadow) + room_layout(self.shadow)).hexdigest()[:4]
-                    result = f"text{self._text():04x}" if opened else f"event{change}"
+                    result = f"text{self._text():04x}" if opened else f"event{self._effect_name(base_progress, base_layout)}"
                     if opened and entity:
                         name = ENTITY_NAMES.get(entity["kind"], "the character")
                         text = f"Talk to {name} {where}"
@@ -423,8 +459,9 @@ class Surveyor:
                         continue
                     add(name, "interact", text, full, short=brief)
                     break
-                if f"push:{target}:{direction}" in found:
-                    continue  # already known; alignment matters, so keep probing until then
+                if f"push:{target}:{direction}" in found or push_tries.get((target, direction), 0) >= 2:
+                    continue  # known, or tried from two standing spots already
+                push_tries[(target, direction)] = push_tries.get((target, direction), 0) + 1
                 # Pushing needs Link lined up with the tile. Try as he stands, then nudged
                 # to the middle of it. Hold only as long as needed: after the object moves,
                 # Link keeps walking, and the next tile may be a pit.
@@ -442,12 +479,12 @@ class Surveyor:
                         pushed, _ = run_route(self.shadow, probe)
                         if self._hurt_after(health - tolerance):
                             break
-                        if not self._effect(entity, pushed, base_progress, base_layout):
+                        if not self._pushed(entity, pushed, base_progress, base_layout):
                             continue
                         # Rule out things that happen anyway, such as a character walking by.
                         self._load(blocked)
                         idle, _ = run_route(self.shadow, (("wait", hold), ("wait", 30)))
-                        if not self._effect(entity, idle, base_progress, base_layout):
+                        if not self._pushed(entity, idle, base_progress, base_layout):
                             add(f"push:{target}:{direction}", "push",
                                 f"Push the object {where} toward the {COMPASS[direction]}", (*step, *probe),
                                 short="Push the object")

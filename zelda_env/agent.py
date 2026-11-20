@@ -22,12 +22,12 @@ from pathlib import Path
 from . import paths
 from .__main__ import add_common, resolve_common
 from .adapter import enemies, execute, observe, room_layout, show_status
-from .survey import ESSENCES, HEALTH, Surveyor, progress, run_route
+from .survey import ESSENCES, HEALTH, OVERWORLD, Surveyor, progress, run_route
 
 GLOBAL_FLAGS = 0xC6D0
 TREASURES = 0xC69A
 TEXT_DISPLAY_STATE = (7, 0xD0C0)
-MEMORY_FORMAT = 4
+MEMORY_FORMAT = 5
 TALKS_PER_CHARACTER = 3
 TOOL_USES_PER_AREA = 10
 SURVEY_LEVELS = (
@@ -42,6 +42,7 @@ def _flag(base, index):
 
 
 ROOM_VISITED = 0x10
+DUNGEON_INDEX = 0xCC39  # 0xFF outside a mapped area
 GROUP4_ROOM_FLAGS = 0xC900
 
 # Hand-written landmarks orient the task. Each objective lists steps as (room, what to
@@ -58,7 +59,7 @@ OBJECTIVES = (
      _flag(TREASURES, 0x15)),
     ("maku-tree-salva", (("01:48", "Use the item on the ground or enter the door or stairs."),),
      "Go to a new room.",
-     _flag(GLOBAL_FLAGS, 0x12)),
+     _flag(GLOBAL_FLAGS, 0x12), 0x0D),
     ("chave-do-cemiterio", (("01:39", "Walk into the event."), ("00:38", "Talk to the character."),
                             ("00:7c", "Enter the door or stairs.")),
      "Enter the door or stairs.", _flag(TREASURES, 0x42)),
@@ -96,6 +97,7 @@ class Memory:
         self.edges = {}  # node -> {option_id: node reached}
         self.banned = set()  # (node, option_id): led to death or left Link without control
         self.landmarks = {}  # objective -> which step it is on
+        self.areas = {}  # room -> exit sets of its separate parts
         self.decisions = 0  # carried across sessions, so a resumed trace keeps counting
         self.epoch = None
         self.current = None
@@ -114,6 +116,21 @@ class Memory:
         self.current = self.epochs[key]
         return changed
 
+    def area(self, room, options):
+        """A stable name for the part of a room Link is in.
+
+        Parts of a room that do not connect have different exits. Two surveys of the same
+        part can find more or fewer of its exits, so sets that share an exit are one area.
+        """
+        exits = {option.destination for option in options if option.kind == "exit"}
+        known = self.areas.setdefault(room, [])
+        for index, seen in enumerate(known):
+            if set(seen) & exits or (not seen and not exits):
+                known[index] = sorted(set(seen) | exits)
+                return f"{room}@{index}"
+        known.append(sorted(exits))
+        return f"{room}@{len(known) - 1}"
+
     def tries(self, node, option_id):
         return self.current["tried"].get(f"{node}|{option_id}", 0)
 
@@ -127,8 +144,7 @@ class Memory:
             return sum(key.startswith(prefix) for key in self.current["tried"]) >= TALKS_PER_CHARACTER
 
         def tool_use(name):
-            return name.startswith("item:") or (name.startswith("interact:") and ":event" in name
-                                                and not name.startswith("interact:slot"))
+            return name.startswith("item:") or (name.startswith("interact:") and ":event" in name)
 
         # A tool can act on every tile of a room. After enough tries in one area with no
         # progress, more of the same is not something new.
@@ -178,7 +194,7 @@ class Memory:
     def dump(self):
         return {"format": MEMORY_FORMAT, "epochs": self.epochs, "edges": self.edges,
                 "banned": sorted(map(list, self.banned)), "epoch": self.epoch, "landmarks": self.landmarks,
-                "decisions": self.decisions}
+                "decisions": self.decisions, "areas": self.areas}
 
     @classmethod
     def load(cls, data):
@@ -190,6 +206,7 @@ class Memory:
         memory.epoch = data["epoch"]
         memory.landmarks = data.get("landmarks", {})
         memory.decisions = data.get("decisions", 0)
+        memory.areas = data.get("areas", {})
         memory.current = memory.epochs[memory.epoch]
         return memory
 
@@ -237,9 +254,12 @@ class Agent:
 
     def objective(self, room=None):
         """Current objective and a short goal: a direction to the next landmark, or what to do."""
-        for name, steps, elsewhere, reached in OBJECTIVES:
+        for name, steps, elsewhere, reached, *where in OBJECTIVES:
             if reached(self.pyboy):
                 continue
+            # An objective can name its dungeon. In any other interior, the goal is to leave.
+            if where and room and room[:2] not in OVERWORLD and self.pyboy.memory[DUNGEON_INDEX] != where[0]:
+                elsewhere = "Go outside."
             state = self.memory.landmarks.setdefault(name, {"step": 0, "arrived": False})
             while room and state["step"] < len(steps):
                 target, task = steps[state["step"]]
@@ -363,7 +383,7 @@ class Agent:
         # A quick pass on 16-pixel steps first. The slower passes run only when the area
         # has nothing new, or still owes an option that only they can route to.
         options = self.surveyor.options(self.pyboy, **SURVEY_LEVELS[0])
-        node = node_of(obs.room, options)
+        node = self.memory.area(obs.room, options)
         # Record the arrival first: it marks the way back as known, and the decision to
         # look deeper must not count that exit as something new.
         self.memory.arrive(node, options, *self.arrival)
@@ -541,7 +561,13 @@ def main():
         with paths.ProfileLock(latest):
             with start.open("rb") as stream:
                 pyboy.load_state(stream)
-            memory = Memory.load(json.loads(memory_file.read_text(encoding="utf-8"))) if resume else None
+            memory = None
+            if resume:
+                try:
+                    memory = Memory.load(json.loads(memory_file.read_text(encoding="utf-8")))
+                except ValueError as error:
+                    # The game state is still good. Only what was tried where is forgotten.
+                    print(f"{error}. A sessão continua do estado salvo, com memória nova.", flush=True)
             print(f"Sessão {'retomada' if resume else 'iniciada'} de {start}", flush=True)
             with (directory / "trace.jsonl").open("a" if resume else "w", encoding="utf-8") as log:
                 agent = Agent(pyboy, surveyor, policy, supervisor=supervisor, memory=memory,
