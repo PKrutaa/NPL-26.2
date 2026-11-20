@@ -43,10 +43,10 @@ def evaluate(pyboy, name, policy, seed, choose_laya=None):
         obs, event, frames = execute(pyboy, action)
         if event == "dialogue_opened":
             talking_to_monkey = action == "interact" and achieved("approach", before)
-        elif event in ("dialogue_advanced", "dialogue_closed"):
-            monkey_dialogue_advanced |= talking_to_monkey and before.dialogue_ready
-            if event == "dialogue_closed":
-                talking_to_monkey = False
+        elif event == "dialogue_advanced":
+            monkey_dialogue_advanced |= talking_to_monkey
+        elif event == "dialogue_closed":
+            talking_to_monkey = False
         trace.append({
             "action": action, "event": event, "frames": frames, "choice_ms": round(latency, 3),
             "after": asdict(obs), **details,

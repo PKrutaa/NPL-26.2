@@ -21,6 +21,7 @@ class Observation:
     y: Optional[int] = None
     facing: Optional[str] = None
     dialogue_ready: bool = False
+    dialogue_has_next_page: bool = False
     entities: tuple = ()
     collision_quadrants: Optional[tuple] = None
 
@@ -38,9 +39,12 @@ def observe(pyboy):
     room = f"{mem[0xCC2D]:02x}:{mem[0xCC30]:02x}"
     mode = "playing"
     ready = False
+    next_page = False
     if mem[0xCBA0]:
         mode = "dialogue"
-        ready = mem[7, 0xD0C0] in (5, 15)
+        text_state = mem[7, 0xD0C0]
+        ready = mem[0xCBA1] == 0 and text_state in (5, 15)
+        next_page = ready and text_state == 5
     elif mem[0xCC8A] or mem[0xCC57] == 8 or mem[0xCBC3]:
         mode = "locked"
     # Small rooms use a 16-byte stride for each 10-tile row. The low nibble
@@ -61,7 +65,8 @@ def observe(pyboy):
     return Observation(
         mode=mode, room=room, x=x, y=y,
         facing=DIRECTIONS[direction] if direction < 4 else None,
-        dialogue_ready=ready, entities=tuple(entities), collision_quadrants=collisions,
+        dialogue_ready=ready, dialogue_has_next_page=next_page,
+        entities=tuple(entities), collision_quadrants=collisions,
     )
 
 
@@ -108,7 +113,7 @@ def execute(pyboy, action):
         event = "dialogue_opened"
     elif before.mode == "dialogue" and after.mode != "dialogue":
         event = "dialogue_closed"
-    elif before.dialogue_ready and not after.dialogue_ready and key in ("a", "b"):
+    elif before.dialogue_has_next_page and not after.dialogue_ready and key in ("a", "b"):
         event = "dialogue_advanced"
     elif action in DIRECTIONS and after.mode == "playing":
         event = "moved" if (before.x, before.y) != (after.x, after.y) else "blocked"
@@ -118,11 +123,16 @@ def execute(pyboy, action):
 
 
 def show_status(pyboy):
-    """Show telemetry in the SDL2 title on the pinned PyBoy version."""
+    """Update the title of the focused SDL window in this process."""
+    from sdl2 import SDL_GetKeyboardFocus, SDL_SetWindowTitle
+
+    window = SDL_GetKeyboardFocus()
+    if not window:
+        return
     obs = observe(pyboy)
     title = f"Ages | frame {pyboy.frame_count} | {obs.mode}"
     if obs.room is not None:
         title += f" | {obs.room} | XY {obs.x},{obs.y} | {obs.facing or '?'}"
     if pyboy.paused:
         title += " | paused"
-    pyboy._plugin_manager.window_sdl2.set_title(title)
+    SDL_SetWindowTitle(window, title.encode("utf-8"))
