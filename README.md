@@ -217,8 +217,8 @@ No benchmark, `--lookahead` mostra o efeito próximo de cada direção ao modelo
 
 O modo agente não usa rotas escritas à mão. Ele parte do seed do boot e repete este ciclo:
 
-1. **Levantamento.** Uma cópia headless do emulador testa movimentos a partir do estado atual e lista o que é possível na sala: saídas, conversas, objetos que podem ser empurrados, uso de item em obstáculo e pontos que disparam uma cena.
-2. **Escolha.** O Laya escolhe uma dessas opções, com o objetivo atual no contexto. O planner converte a escolha em inputs de controle.
+1. **Levantamento.** Uma cópia headless do emulador testa movimentos a partir do estado atual e lista o que é possível na sala: saídas, conversas, objetos que podem ser empurrados, uso de item em obstáculo ou no chão, luta de espada contra um inimigo e pontos que disparam uma cena.
+2. **Escolha.** O Laya escolhe uma dessas opções. Ele recebe um objetivo curto, como `Go north.`, e opções curtas, como `Go north to a new room` ou `Attack the enemy`. O planner converte a escolha em inputs de controle.
 3. **Memória.** Uma opção já tentada na mesma área, sem progresso na história, sai da lista. Uma conversa volta para a lista quando o personagem tem uma fala nova. Sem nada novo na sala, o agente vai para a área conhecida mais próxima que ainda tem opções.
 4. **Parada.** Quando não resta nada novo em lugar nenhum, o agente registra o impasse e para. Ele não fica repetindo a mesma ação.
 
@@ -226,11 +226,14 @@ O modo agente não usa rotas escritas à mão. Ele parte do seed do boot e repet
 .venv/bin/python -m zelda_env.agent                     # com janela
 .venv/bin/python -m zelda_env.agent --headless --decisions 300
 .venv/bin/python -m zelda_env.agent --fresh             # recomeça do seed
+.venv/bin/python -m zelda_env.agent --policy random     # comparação: sorteia entre as mesmas opções
 ```
 
 A sessão fica em `output/agent/`: `latest.state` e `memory.json` para retomar, `trace.jsonl` com uma linha por decisão e `summary.json` com o resumo. Cada decisão registra a origem: `laya`, `forced` (só havia uma opção nova), `frontier` (viagem até uma área com opções), `supervisor` ou `fallback`. O resumo traz `max_repeats_of_one_option_in_one_story_state`, que mede repetição.
 
-Os objetivos em `zelda_env/agent.py` são dicas de texto para o Laya e um teste lido da memória do jogo, como a flag da espada. Eles não contêm rotas nem coordenadas.
+Os objetivos em `zelda_env/agent.py` são etapas escritas à mão: uma sala de referência, o que fazer ao chegar e um teste lido da memória do jogo, como a flag da espada. O agente converte a sala de referência em uma direção. Eles não contêm rotas nem coordenadas. A lista vai até a primeira essência.
+
+Cada decisão registra também a vida de Link. O levantamento descarta rotas que causam dano, e uma decisão que mata Link é desfeita e nunca mais oferecida naquele ponto.
 
 ### Supervisor opcional
 

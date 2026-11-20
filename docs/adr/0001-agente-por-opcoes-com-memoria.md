@@ -1,7 +1,7 @@
 # ADR 0001: o Laya escolhe entre opções descobertas por simulação, e a memória impede loops
 
 - **Status:** aceito
-- **Data:** 20 de novembro de 2026
+- **Data:** 20 de novembro de 2026, com revisão no mesmo dia (luta, itens, camadas e contexto curto)
 - **Contexto de execução:** Oracle of Ages US no PyBoy 2.8.1, Laya 0.5.0 local em CPU
 
 ## Contexto
@@ -43,8 +43,16 @@ flowchart TD
 | `interact` | Um passo é bloqueado, ou há um personagem à frente, e apertar A ou B abre diálogo, muda o terreno ou muda o progresso. |
 | `push` | Segurar a direção por 60 frames move o objeto ou muda o estado, e esperar o mesmo tempo sem empurrar não muda. |
 | `trigger` | Um passo, ou ficar parado 150 frames, tira o jogo do controle normal. |
+| `fight` | Há inimigo na sala e uma luta de espada simulada mata um deles dentro do limite de dano. |
+| `item` | Um item que não é a espada, usado no tile à frente, muda o terreno. Vale para chão livre, como cavar com a pá. |
 
-Rotas que causam dano são descartadas. O emulador principal só recebe inputs de controle. Nada é escrito na memória do jogo.
+**Luta.** A cópia headless parte do estado exato do jogo, inclusive o gerador aleatório. Uma luta que dá certo nela se repete igual no emulador principal. O levantamento testa nove táticas: perseguir o inimigo contornando obstáculos, ou ficar parado e golpear quando ele se aproxima. A primeira que mata um inimigo vira a rota da opção. Primeiro sem dano; depois aceitando até um coração, se sobrarem dois.
+
+**Camadas.** O levantamento roda em três níveis de detalhe: passos de 16 px, de 12 px e de 12 px com grade de 4 px. O nível rápido roda sempre. O seguinte roda quando a área não tem nada novo ou parece um beco sem saída. O mais fino roda só quando nenhuma outra área conhecida tem opções. O nível rápido leva cerca de um terço do tempo do seguinte.
+
+**Salas que mudam sozinhas.** Em algumas salas os tiles mudam com o tempo. O levantamento detecta isso esperando 30 frames no início e, nesse caso, não usa mudança de tile como prova de efeito.
+
+Rotas que causam dano são descartadas. Os testes de interagir, empurrar e esperar também conferem a vida, inclusive o dano que chega com atraso, como cair num buraco. O emulador principal só recebe inputs de controle. Nada é escrito na memória do jogo.
 
 O levantamento usa a simulação em vez de decodificar colisão. A leitura de colisão só cobre salas pequenas e não inclui objetos, personagens e itens.
 
@@ -61,7 +69,11 @@ Quatro definições sustentam a regra:
 
 ### 3. O Laya escolhe, com a origem registrada
 
-Com duas ou mais candidatas, o Laya recebe o objetivo atual, a sala, a posição, os três últimos resultados e a descrição de até oito opções. O objetivo é uma dica de texto com um teste lido da memória do jogo. Não contém rota nem coordenada.
+Com duas ou mais candidatas, o Laya recebe só um objetivo curto e até doze opções curtas. Exemplo: objetivo `Go north.` e opções `Go north to a new room`, `Talk to the character`, `Attack the enemy`.
+
+O texto curto foi uma decisão medida. Em 23 decisões reais com uma saída na direção do objetivo, o Laya escolheu essa saída em 9 com o contexto longo (objetivo em frase, sala, posição, histórico) e em 23 com o contexto curto, com confiança média de 0,87. O acaso daria 6,5.
+
+Cada objetivo é uma lista de etapas escrita à mão, com uma sala de referência e o que fazer ao chegar, mais um teste lido da memória do jogo que o encerra. Enquanto Link está no mesmo mapa da sala de referência, o objetivo é a direção até ela, com uma direção só: a de maior distância que tenha saída disponível. Em outro mapa, como um interior, o objetivo é um texto fixo, por exemplo `Go to a new room.`. As salas e flags vêm do disassembly. Não há rota nem coordenada.
 
 Cada decisão registra a origem no `trace.jsonl`:
 
@@ -93,18 +105,18 @@ O código rejeita JSON inválido, id fora da lista e resposta depois de 20 segun
 
 **O que custa**
 
-- Cada decisão leva cerca de 9 segundos de levantamento em um Apple M3 Pro. A inferência do Laya leva cerca de 0,25 segundo.
+- Cada decisão leva de 3 a 5 segundos de levantamento em um Apple M3 Pro. A inferência do Laya leva cerca de 0,25 segundo.
 - A exploração é larga quando o Laya escolhe mal a direção. A memória garante que ele não repete, mas não que ele vá pelo caminho mais curto.
 - O Laya decide menos do que parece. Em parte das decisões só há uma opção nova.
 
 **O que não está coberto**
 
-- Combate, HP e morte. O levantamento só evita rotas que causam dano na simulação.
-- Itens que agem à distância ou em terreno livre, como cavar com a pá.
-- Menu, equipar item e escolhas de sim ou não com consequência.
+- Combate além da espada: chefes com padrão próprio, inimigos que exigem outro item e projéteis.
+- Recuperar vida. O agente evita dano e desfaz a decisão que mata, mas não procura corações.
+- Menu, equipar item e escolhas de sim ou não com consequência. O jogo equipa sozinho os dois primeiros itens; a partir do terceiro é preciso o menu.
 - Puzzles que exigem uma sequência de ações na mesma sala sem mudança visível entre elas.
 
-Esses itens são pré-requisitos para a primeira dungeon.
+O menu de itens é pré-requisito para terminar a primeira dungeon, que entrega um terceiro item.
 
 ## Alternativas consideradas
 
