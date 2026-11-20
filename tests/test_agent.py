@@ -158,4 +158,5 @@ def test_goal_names_one_direction_that_has_an_exit():
     made.policy.choose = lambda context, criteria: (captured.append(context["goal"]) or sorted(criteria)[0], {})
     made.decide(OBS, node, options, "Go north or west.")
     made.decide(OBS, node, options, "Go north or east.")
-    assert captured == ["Go west.", "Go north."]
+    # With no exit in either direction, the way there goes around: the goal is to explore.
+    assert captured == ["Go west.", "Go to a new room."]

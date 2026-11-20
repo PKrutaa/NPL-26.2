@@ -138,3 +138,30 @@ def test_surveys_that_share_an_exit_are_the_same_area():
     other = memory.area("A", exits("D"))  # no exit in common: another part of the room
     assert other != first
     assert Memory.load(json.loads(json.dumps(memory.dump()))).area("A", exits("D")) == other
+
+
+def test_a_survey_that_links_two_areas_joins_their_records():
+    memory = Memory()
+    south = memory.area("A", exits("S"))
+    north = memory.area("A", exits("N"))
+    assert south != north
+    memory.arrive(north, exits("N"))
+    memory.record(north, "exit:N")
+    memory.edges.setdefault("X@0", {})["exit:A"] = north
+    joined = memory.area("A", exits("S", "N"))  # the block between them was pushed aside
+    assert joined == south
+    assert memory.tries(south, "exit:N") == 1
+    assert memory.edges["X@0"]["exit:A"] == south
+    assert north not in memory.current["pending"] and north not in memory.current["visited"]
+
+
+def test_an_option_that_opened_a_way_is_offered_again_when_the_way_closes():
+    memory = Memory()
+    push = Option("push:7:4:up", "push", "push", ())
+    closed, opened = [*exits("S"), push], [*exits("S", "N"), push]
+    node = memory.area("A", closed)
+    memory.arrive(node, closed)
+    memory.record(node, push.id)
+    memory.unlocked(node, push.id, {"exit:N"})
+    assert push not in memory.fresh(node, opened)   # the way is open: nothing to redo
+    assert push in memory.fresh(node, closed)       # the room reset: push again

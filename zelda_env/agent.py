@@ -27,7 +27,7 @@ from .survey import ESSENCES, HEALTH, OVERWORLD, Surveyor, progress, run_route
 GLOBAL_FLAGS = 0xC6D0
 TREASURES = 0xC69A
 TEXT_DISPLAY_STATE = (7, 0xD0C0)
-MEMORY_FORMAT = 5
+MEMORY_FORMAT = 6
 TALKS_PER_CHARACTER = 3
 TOOL_USES_PER_AREA = 10
 SURVEY_LEVELS = (
@@ -98,6 +98,7 @@ class Memory:
         self.banned = set()  # (node, option_id): led to death or left Link without control
         self.landmarks = {}  # objective -> which step it is on
         self.areas = {}  # room -> exit sets of its separate parts
+        self.opened = {}  # "area|option" -> exits that appeared after taking it
         self.decisions = 0  # carried across sessions, so a resumed trace keeps counting
         self.epoch = None
         self.current = None
@@ -121,15 +122,43 @@ class Memory:
 
         Parts of a room that do not connect have different exits. Two surveys of the same
         part can find more or fewer of its exits, so sets that share an exit are one area.
+        A survey that links two known areas (a block was pushed aside) joins them.
         """
         exits = {option.destination for option in options if option.kind == "exit"}
         known = self.areas.setdefault(room, [])
-        for index, seen in enumerate(known):
-            if set(seen) & exits or (not seen and not exits):
-                known[index] = sorted(set(seen) | exits)
-                return f"{room}@{index}"
-        known.append(sorted(exits))
-        return f"{room}@{len(known) - 1}"
+        matches = [index for index, seen in enumerate(known)
+                   if seen is not None and (set(seen) & exits or (not seen and not exits))]
+        if not matches:
+            known.append(sorted(exits))
+            return f"{room}@{len(known) - 1}"
+        keep = matches[0]
+        for index in matches[1:]:
+            exits |= set(known[index])
+            known[index] = None
+            self._join(f"{room}@{index}", f"{room}@{keep}")
+        known[keep] = sorted(set(known[keep]) | exits)
+        return f"{room}@{keep}"
+
+    def _join(self, old, new):
+        """Move everything recorded under one area name to another."""
+        for epoch in self.epochs.values():
+            for key in [key for key in epoch["tried"] if key.startswith(f"{old}|")]:
+                target = f"{new}|{key.split('|', 1)[1]}"
+                epoch["tried"][target] = epoch["tried"].get(target, 0) + epoch["tried"].pop(key)
+            epoch["pending"].pop(old, None)
+            epoch["visited"] = list(dict.fromkeys(new if name == old else name for name in epoch["visited"]))
+        self.edges.setdefault(new, {}).update(self.edges.pop(old, {}))
+        for links in self.edges.values():
+            for option_id, destination in links.items():
+                if destination == old:
+                    links[option_id] = new
+        for key in [key for key in self.opened if key.startswith(f"{old}|")]:
+            self.opened[f"{new}|{key.split('|', 1)[1]}"] = self.opened.pop(key)
+        self.banned = {(new if node == old else node, option_id) for node, option_id in self.banned}
+
+    def unlocked(self, node, option_id, exits):
+        """Remember that an option made these exits appear (a block pushed out of the way)."""
+        self.opened[f"{node}|{option_id}"] = sorted(set(self.opened.get(f"{node}|{option_id}", [])) | set(exits))
 
     def tries(self, node, option_id):
         return self.current["tried"].get(f"{node}|{option_id}", 0)
@@ -151,9 +180,18 @@ class Memory:
         worn = sum(count for key, count in self.current["tried"].items()
                    if key.startswith(f"{node}|") and tool_use(key.split("|", 1)[1])) >= TOOL_USES_PER_AREA
 
+        offered = {option.id for option in options}
+
+        def reopens(option):
+            # Some rooms reset when Link leaves. What opened a way before is worth doing
+            # again whenever that way is closed.
+            ways = self.opened.get(f"{node}|{option.id}")
+            return bool(ways) and not set(ways) <= offered
+
         return [option for option in options
-                if (node, option.id) not in self.banned and not self.tries(node, option.id)
-                and not chatty(option) and not (worn and tool_use(option.id))]
+                if (node, option.id) not in self.banned and (reopens(option) or (
+                    not self.tries(node, option.id) and not chatty(option)
+                    and not (worn and tool_use(option.id))))]
 
     def arrive(self, node, options, origin=None, via=None):
         """Record the area Link is in, and how he got here."""
@@ -194,7 +232,7 @@ class Memory:
     def dump(self):
         return {"format": MEMORY_FORMAT, "epochs": self.epochs, "edges": self.edges,
                 "banned": sorted(map(list, self.banned)), "epoch": self.epoch, "landmarks": self.landmarks,
-                "decisions": self.decisions, "areas": self.areas}
+                "decisions": self.decisions, "areas": self.areas, "opened": self.opened}
 
     @classmethod
     def load(cls, data):
@@ -207,6 +245,7 @@ class Memory:
         memory.landmarks = data.get("landmarks", {})
         memory.decisions = data.get("decisions", 0)
         memory.areas = data.get("areas", {})
+        memory.opened = data.get("opened", {})
         memory.current = memory.epochs[memory.epoch]
         return memory
 
@@ -248,6 +287,7 @@ class Agent:
         self.deaths = 0
         self.empty = 0
         self.scenes = 0
+        self.last = None
         self.damage = 0
         self.arrival = (None, None)  # (node left, option taken) for the last decision
         self.done = [item[0] for item in OBJECTIVES if item[3](pyboy)]
@@ -362,7 +402,8 @@ class Agent:
         if " or " in hint and hint.startswith("Go "):
             wanted = hint[3:-1].split(" or ")
             offered = [way for way in wanted if any(text.startswith(f"Go {way}") for text in criteria.values())]
-            hint = f"Go {(offered or wanted)[0]}."
+            # With no exit either way, the way there goes around: explore instead.
+            hint = f"Go {offered[0]}." if offered else "Go to a new room."
         key, laya = self.policy.choose({"goal": hint}, criteria)
         # The origin names who chose, so a comparison run is never attributed to Laya.
         return keys[key], getattr(self, "label", "laya"), {**details, "laya": laya}
@@ -420,6 +461,9 @@ class Agent:
             self.write({"event": "scene", "room": obs.room, "id": scene.id})
             return True
         self.memory.arrive(node, options)
+        exits_now = {item.id for item in options if item.kind == "exit"}
+        if self.last and self.last[0] == node and exits_now - self.last[2]:
+            self.memory.unlocked(node, self.last[1], exits_now - self.last[2])
         started = time.perf_counter()
         option, origin, details = self.decide(obs, node, options, hint)
         choice_seconds = time.perf_counter() - started
@@ -444,6 +488,8 @@ class Agent:
         self.pyboy.save_state(before)
         health, story = self.pyboy.memory[HEALTH], progress(self.pyboy)
         self.memory.record(node, option.id)
+        # Kept to notice, at the next survey, an option that makes new exits appear.
+        self.last = (node, option.id, exits_now) if option.kind != "exit" else None
         run_route(self.pyboy, option.route, render=self.watch)
         controllable = self.settle()
         after = observe(self.pyboy)
