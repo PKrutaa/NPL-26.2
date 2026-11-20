@@ -62,7 +62,8 @@ def observe(pyboy):
     for slot, address in enumerate(range(0xD040, 0xE000, 0x100)):
         if mem[1, address] and mem[1, address + 0x1A] & 0x80:
             ex, ey = mem[1, address + 0x0D], mem[1, address + 0x0B]
-            if ex < 160 and ey < 128:
+            # Large rooms (towers, dungeons) are 240 by 176 pixels.
+            if ex < 240 and ey < 176:
                 kind = {0x31: "Impa", 0x39: "monkey"}.get(mem[1, address + 1], "unknown")
                 entities.append({"slot": slot, "kind": kind, "x": ex, "y": ey})
     return Observation(

@@ -108,3 +108,35 @@ def test_dropped_option_is_never_chosen():
         chosen, _, _ = made.decide(OBS, node, options, "goal")
         made.memory.record(node, chosen.id)
         assert chosen.id == "talk:1"
+
+
+def test_heading_gives_compass_words_between_overworld_screens():
+    from zelda_env.agent import heading
+
+    assert heading("00:8a", "00:39") == "north or west"
+    assert heading("00:68", "00:48") == "north"
+    assert heading("00:38", "00:39") == "east"
+    # No direction across maps (indoors, dungeons) or once the landmark is reached.
+    assert heading("03:f8", "00:48") is None
+    assert heading("00:48", "00:48") is None
+
+
+def test_laya_reads_only_the_short_goal_and_short_options():
+    made = agent()
+    options = [Option("exit:B", "exit", "Leave through the north edge of this screen", (), "B", "Go north"),
+               Option("talk:1", "interact", "Talk to the character to the east", (), None, "Talk to the character")]
+    node = node_of("A", options)
+    made.memory.arrive(node, options)
+    made.decide(OBS, node, options, "Go north.")
+    assert set(made.policy.asked[0].values()) == {"Go north", "Talk to the character"}
+
+
+def test_goal_follows_the_steps_of_the_objective():
+    made = agent()
+    made.pyboy = SimpleNamespace(memory={address: 0 for address in range(0xC600, 0xCA00)})
+    made.pyboy.memory[0xC6D0 + 1] = 0x04  # sword received: global flag 0x0a
+    assert made.objective("00:39") == ("maku-tree", "Go south or west.")
+    assert made.objective("00:68") == ("maku-tree", "Go north.")  # waypoint passed on arrival
+    assert made.objective("00:48") == ("maku-tree", "Enter the door or stairs.")
+    assert made.objective("04:04") == ("maku-tree", "Go north.")  # inside the Maku Path
+    assert made.objective("00:38") == ("maku-tree", "Talk to the character.")

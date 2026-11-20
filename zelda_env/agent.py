@@ -27,7 +27,7 @@ from .survey import ESSENCES, HEALTH, Surveyor, progress, run_route
 GLOBAL_FLAGS = 0xC6D0
 TREASURES = 0xC69A
 TEXT_DISPLAY_STATE = (7, 0xD0C0)
-MEMORY_FORMAT = 2
+MEMORY_FORMAT = 4
 SURVEY_LEVELS = (
     {"grid": 16, "stride": 16, "limit": 400},
     {"grid": 8, "stride": 12, "limit": 700},
@@ -39,21 +39,40 @@ def _flag(base, index):
     return lambda pyboy: bool(pyboy.memory[base + index // 8] & (1 << index % 8))
 
 
-# Hand-written hints orient the task. Each one ends on a fact read from the game.
+ROOM_VISITED = 0x10
+GROUP4_ROOM_FLAGS = 0xC900
+
+# Hand-written landmarks orient the task. Each objective lists steps as (room, what to
+# do there), a short goal for when Link is on another map (indoors, a dungeon, the other
+# era), and a fact read from the game that ends it. There are no routes or coordinates.
+# Rooms and flags come from the pinned disassembly (warp tables, global flags, treasures).
 OBJECTIVES = (
-    ("espada", "Go north to find Impa and follow her. Help her, then meet Nayru in the forest clearing "
-               "and talk to everyone there.", _flag(GLOBAL_FLAGS, 0x0A)),
-    ("maku-tree", "Leave the forest, travel west to Lynna City, then go north to meet the Maku Tree.",
-     _flag(GLOBAL_FLAGS, 0x0C)),
-    ("passado", "Return to the forest clearing east of the Maku Tree and step into the time portal.",
-     _flag(GLOBAL_FLAGS, 0x41)),
-    ("pa", "In the past, travel south-west to the Black Tower and get the shovel from the workers inside.",
-     _flag(TREASURES, 0x15)),
-    ("essencia-1", "Go to the Maku Tree gate in the north of Lynna Village, save the Maku Tree, then find "
-                   "the first dungeon and obtain the first Essence of Time.",
-     lambda pyboy: bool(pyboy.memory[ESSENCES] & 1)),
-    ("oito-essencias", "Obtain all eight Essences of Time.", lambda pyboy: pyboy.memory[ESSENCES] == 0xFF),
+    ("espada", (("00:39", "Talk to the character and wait for the event."),),
+     "Enter the door or stairs.", _flag(GLOBAL_FLAGS, 0x0A)),
+    ("maku-tree", (("00:68", None), ("00:48", "Enter the door or stairs."), ("00:38", "Talk to the character.")),
+     "Go north.", _flag(GLOBAL_FLAGS, 0x0C)),
+    ("passado", (("00:39", "Walk into the event."),), "Go south.", _flag(GLOBAL_FLAGS, 0x41)),
+    ("pa", (("01:76", "Enter the door or stairs."),), "Talk to the character.", _flag(TREASURES, 0x15)),
+    ("maku-tree-salva", (("01:48", "Use the item on the obstacle."),), "Go north.", _flag(GLOBAL_FLAGS, 0x12)),
+    ("chave-do-cemiterio", (("01:39", "Walk into the event."), ("00:38", "Talk to the character."),
+                            ("00:7c", "Enter the door or stairs.")),
+     "Enter the door or stairs.", _flag(TREASURES, 0x42)),
+    ("dungeon-1", (("00:8d", "Enter the door or stairs."),), "Enter the door or stairs.",
+     lambda pyboy: bool(pyboy.memory[GROUP4_ROOM_FLAGS + 0x24] & ROOM_VISITED)),
+    ("essencia-1", (), "Attack the enemy.", lambda pyboy: bool(pyboy.memory[ESSENCES] & 1)),
+    ("oito-essencias", (), "Explore.", lambda pyboy: pyboy.memory[ESSENCES] == 0xFF),
 )
+
+
+def heading(room, target):
+    """Compass words from one overworld screen to another. None across maps."""
+    if room[:2] != target[:2] or room == target:
+        return None
+    here, there = int(room[3:], 16), int(target[3:], 16)
+    dy, dx = there // 16 - here // 16, there % 16 - here % 16
+    words = [word for word in ("north" if dy < 0 else "south" if dy > 0 else "",
+                               "west" if dx < 0 else "east" if dx > 0 else "") if word]
+    return " or ".join(words)
 
 
 def node_of(room, options):
@@ -69,6 +88,7 @@ class Memory:
         self.epochs = {}
         self.edges = {}  # node -> {option_id: node reached}
         self.banned = set()  # (node, option_id): led to death or left Link without control
+        self.landmarks = {}  # objective -> how many of its landmarks were reached
         self.epoch = None
         self.current = None
         self.enter(b"")
@@ -132,7 +152,7 @@ class Memory:
 
     def dump(self):
         return {"format": MEMORY_FORMAT, "epochs": self.epochs, "edges": self.edges,
-                "banned": sorted(map(list, self.banned)), "epoch": self.epoch}
+                "banned": sorted(map(list, self.banned)), "epoch": self.epoch, "landmarks": self.landmarks}
 
     @classmethod
     def load(cls, data):
@@ -142,6 +162,7 @@ class Memory:
         memory.epochs, memory.edges = data["epochs"], data["edges"]
         memory.banned = {tuple(item) for item in data["banned"]}
         memory.epoch = data["epoch"]
+        memory.landmarks = data.get("landmarks", {})
         memory.current = memory.epochs[memory.epoch]
         return memory
 
@@ -185,12 +206,30 @@ class Agent:
         self.scenes = 0
         self.damage = 0
         self.arrival = (None, None)  # (node left, option taken) for the last decision
-        self.done = [name for name, _, reached in OBJECTIVES if reached(pyboy)]
+        self.done = [item[0] for item in OBJECTIVES if item[3](pyboy)]
 
-    def objective(self):
-        for name, hint, reached in OBJECTIVES:
-            if not reached(self.pyboy):
-                return name, hint
+    def objective(self, room=None):
+        """Current objective and a short goal: a direction to the next landmark, or what to do."""
+        for name, steps, elsewhere, reached in OBJECTIVES:
+            if reached(self.pyboy):
+                continue
+            state = self.memory.landmarks.setdefault(name, {"step": 0, "arrived": False})
+            while room and state["step"] < len(steps):
+                target, task = steps[state["step"]]
+                last = state["step"] == len(steps) - 1
+                if room == target:
+                    if task is None and not last:
+                        state["step"] += 1  # a waypoint: nothing to do here
+                        continue
+                    state["arrived"] = True
+                    return name, task or elsewhere
+                if state["arrived"] and room[:2] != target[:2] and not last:
+                    # The task here was to go through something, and Link did.
+                    state.update(step=state["step"] + 1, arrived=False)
+                    continue
+                where = heading(room, target)
+                return name, (f"Go {where}." if where else elsewhere)
+            return name, elsewhere
         return None, "Explore."
 
     def status(self, text):
@@ -260,7 +299,9 @@ class Agent:
         if len(candidates) == 1:
             return candidates[0], "forced", details
         keys = {f"option_{index + 1}": option for index, option in enumerate(candidates)}
-        key, laya = self.policy.choose(context, {key: option.description for key, option in keys.items()})
+        # Laya matches short text well and long text at chance, so it gets only the goal.
+        key, laya = self.policy.choose({"goal": hint}, {key: option.short or option.description
+                                                         for key, option in keys.items()})
         # The origin names who chose, so a comparison run is never attributed to Laya.
         return keys[key], getattr(self, "label", "laya"), {**details, "laya": laya}
 
@@ -275,7 +316,7 @@ class Agent:
             self.idle = 0
             if self.supervisor:
                 self.supervisor.progressed()
-        name, hint = self.objective()
+        name, hint = self.objective(obs.room)
         started = time.perf_counter()
         # A quick pass on 16-pixel steps first. The slower passes run only when the area
         # has nothing new, or still owes an option that only they can route to.
@@ -288,6 +329,8 @@ class Agent:
             owed = [item for item in self.memory.current["pending"].get(node, []) if item not in found]
             if depth.get(node, 0) > level and not owed:
                 break  # the deeper passes already ran here and left nothing to do
+            if level == len(SURVEY_LEVELS) - 2 and not owed and self.memory.hop(node, options):
+                break  # the finest pass is slow: keep it for when no other area has options
             level += 1
             depth[node] = max(depth.get(node, 0), level)
             options += [option for option in self.surveyor.options(self.pyboy, **SURVEY_LEVELS[level])
@@ -351,7 +394,7 @@ class Agent:
         if outcome != "failed, option dropped":
             self.arrival = (node, option.id)
         self.recent.append(f"{option.description} -> {outcome}")
-        reached = [item for item, _, check in OBJECTIVES if check(self.pyboy) and item not in self.done]
+        reached = [item[0] for item in OBJECTIVES if item[3](self.pyboy) and item[0] not in self.done]
         self.done.extend(reached)
         self.write({
             "decision": self.decisions, "objective": name, "room": obs.room, "xy": [obs.x, obs.y],

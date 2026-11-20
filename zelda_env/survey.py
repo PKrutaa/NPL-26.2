@@ -47,6 +47,7 @@ class Option:
     description: str
     route: tuple = field(compare=False, repr=False)  # ((action, hold_frames), ...)
     destination: str = None
+    short: str = None  # the few words Laya reads; it matches short text far better
 
 
 def bearing(obs, x, y):
@@ -183,9 +184,9 @@ class Surveyor:
         queue = deque([(root, ())])
         expanded = 0
 
-        def add(option_id, kind, description, route, destination=None):
+        def add(option_id, kind, description, route, destination=None, short=None):
             if option_id not in found:
-                found[option_id] = Option(option_id, kind, description, route, destination)
+                found[option_id] = Option(option_id, kind, description, route, destination, short or description)
 
         def linger(state, route, here):
             self._load(state)
@@ -196,7 +197,7 @@ class Surveyor:
                 spot = f"text{self._text():04x}" if waited.mode == "dialogue" else f"{here.x // 32}:{here.y // 32}"
                 add(f"trigger:wait:{spot}", "trigger",
                     f"Go to the spot {bearing(start, here.x, here.y)} and wait there for something to happen",
-                    (*route, *probe))
+                    (*route, *probe), short="Wait for the event")
 
         foes = enemies(pyboy)
         sword = self.sword_action(pyboy)
@@ -210,7 +211,8 @@ class Surveyor:
                     nearest = min(foes, key=lambda item: abs(item["x"] - start.x) + abs(item["y"] - start.y))
                     cost = "" if not won[1] else ", taking some damage"
                     add(f"fight:{len(foes)}:{nearest['id']:02x}", "fight",
-                        f"Attack the enemy {bearing(start, nearest['x'], nearest['y'])} with the sword{cost}", won[0])
+                        f"Attack the enemy {bearing(start, nearest['x'], nearest['y'])} with the sword{cost}", won[0],
+                        short="Attack the enemy")
                     break
 
         while queue and expanded < limit:
@@ -241,19 +243,22 @@ class Surveyor:
                 step = (*step, *((("wait", 12),) * waits))
                 if after.room is None:
                     add(f"trigger:{after.mode}:{direction}", "trigger",
-                        f"Walk to the spot {bearing(start, before.x, before.y)} where a scene starts", step)
+                        f"Walk to the spot {bearing(start, before.x, before.y)} where a scene starts", step,
+                        short="Walk into the event")
                     continue
                 if after.room != start.room:
                     same_map = after.room[:2] == start.room[:2]
                     where = (f"the {COMPASS[direction]} edge of this screen" if same_map
                              else f"the doorway or stairs {bearing(start, before.x, before.y)}")
-                    add(f"exit:{after.room}", "exit", f"Leave through {where}", step, after.room)
+                    add(f"exit:{after.room}", "exit", f"Leave through {where}", step, after.room,
+                        short=f"Go {COMPASS[direction]}" if same_map else "Enter the door or stairs")
                     continue
                 if after.mode != "playing":
                     # One option per event: a line of trigger tiles is a single thing to do.
                     spot = f"text{self._text():04x}" if after.mode == "dialogue" else direction
                     add(f"trigger:{spot}", "trigger",
-                        f"Walk to the spot {bearing(start, before.x, before.y)} where something happens", step)
+                        f"Walk to the spot {bearing(start, before.x, before.y)} where something happens", step,
+                        short="Walk into the event")
                     continue
                 dx, dy = DELTA[direction]
                 if event == "moved":
@@ -299,7 +304,9 @@ class Surveyor:
                         text = f"Talk to the character {where}, who reacts"
                     else:
                         text = f"Use the {button.upper()} button item on the obstacle {where}"
-                    add(f"interact:{target}:{button}:{result}", "interact", text, (*step, *probe))
+                    brief = ("Talk to the character" if entity else "Read the sign" if opened
+                             else "Use the item on the obstacle")
+                    add(f"interact:{target}:{button}:{result}", "interact", text, (*step, *probe), short=brief)
                     break
                 if f"push:{target}:{direction}" in found:
                     continue  # already known; alignment matters, so keep probing until then
@@ -314,7 +321,8 @@ class Surveyor:
                     idle, _ = run_route(self.shadow, (("wait", 60), ("wait", 30)))
                     if not self._effect(entity, idle, base_progress, base_layout):
                         add(f"push:{target}:{direction}", "push",
-                            f"Push the object {where} toward the {COMPASS[direction]}", (*step, *probe))
+                            f"Push the object {where} toward the {COMPASS[direction]}", (*step, *probe),
+                            short="Push the object")
             if route and not responded:
                 # Controls that stop answering right after a walk mean a scene is about to start.
                 linger(state, route, here)

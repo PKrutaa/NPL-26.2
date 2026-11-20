@@ -53,7 +53,7 @@ class LayaPolicy:
         text = "\n".join(f"{key}: {value}" for key, value in context.items())
         question = {"action": {
             "type": "choice",
-            "instructions": "Which option makes the most progress toward the stated goal now?",
+            "instructions": "Which option reaches the goal?",
             "criteria": criteria,
         }}
         result = self.agent.predict(text, question)
