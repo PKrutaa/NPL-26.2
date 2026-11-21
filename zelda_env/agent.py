@@ -242,12 +242,12 @@ class Memory:
         if option_id in pending:
             pending.remove(option_id)
 
-    def hop(self, node, options, allowed=None, leaving=False, to=None):
+    def hop(self, node, options, allowed=None, leaving=False, to=None, avoid=()):
         """First step of the shortest known path to somewhere worth going.
 
         By default that is an area with untried options, limited to rooms that pass
         `allowed`. With `leaving`, it is any area that has a known exit to the overworld.
-        With `to`, it is that room.
+        With `to`, it is that room, except the areas of it listed in `avoid`.
         """
         available = {option.id for option in options if (node, option.id) not in self.banned}
         queue = deque((destination, option_id) for option_id, destination in self.edges.get(node, {}).items()
@@ -260,7 +260,7 @@ class Memory:
             seen.add(current)
             room = current.split("@")[0]
             if to:
-                if room == to:
+                if room == to and current not in avoid:
                     return first
             elif leaving:
                 if room[:2] in OVERWORLD:
@@ -386,7 +386,7 @@ class Agent:
 
     def objective(self, room=None):
         """Current objective and a short goal: a direction to the next landmark, or what to do."""
-        self.target = None
+        self.target = self.landmark = None
         for name, steps, elsewhere, reached, *where in OBJECTIVES:
             if reached(self.pyboy):
                 continue
@@ -403,6 +403,7 @@ class Agent:
                         state["step"] += 1  # a waypoint: nothing to do here
                         continue
                     state["arrived"] = True
+                    self.landmark = target
                     return name, task or elsewhere
                 if state["arrived"] and room[:2] != target[:2] and not last:
                     # The task here was to go through something, and Link did.
@@ -493,16 +494,26 @@ class Agent:
         # A known exit that points at the goal can be used again, a limited number of
         # times per story state. Without this, Link could not walk back the way he came.
         reused = self.memory.current.setdefault("reused", {})
+        # A landmark room can have parts that do not connect. A part where nothing is left
+        # to do is spent: the task is in another part, reached some other way.
+        spent = self.memory.current.setdefault("spent", [])
+        known = self.memory.edges.get(room, {})
         ways = [option for option in usable if option.kind == "exit" and option not in fresh
-                and reused.get(f"{room}|{option.id}", 0) < GOAL_REUSES]
+                and reused.get(f"{room}|{option.id}", 0) < GOAL_REUSES and known.get(option.id) not in spent]
         target = getattr(self, "target", None)
+        if target:
+            # A way into the landmark that was never taken comes before any known path.
+            door = next((option for option in fresh if option.kind == "exit" and option.destination == target), None)
+            if door:
+                return door, "route", {}
         if target and self.hops < MAX_HOPS:
             # Link has been to the landmark before: follow the map he built, not the compass.
-            first = self.memory.hop(room, options, to=target)
+            first = self.memory.hop(room, options, to=target, avoid=spent)
             if first:
                 self.hops += 1
                 return next(option for option in usable if option.id == first), "route", {}
-            first = self.memory.room_hop(obs.room, lambda place: place == target)
+            first = not any(name.split("@")[0] == target for name in spent) and self.memory.room_hop(
+                obs.room, lambda place: place == target)
             step = first and next((option for option in usable if option.id == first), None)
             if step:
                 self.hops += 1
@@ -535,6 +546,8 @@ class Agent:
                     done[room] = done.get(room, 0) + 1
                     fresh = [*fresh, *again]
         impasse = not fresh
+        if impasse and getattr(self, "landmark", None) == obs.room and room not in spent:
+            spent.append(room)
 
         def by_recipe(exit_id):
             """The next thing to do here to get through an exit that is closed right now."""

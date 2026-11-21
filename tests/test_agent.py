@@ -253,3 +253,35 @@ def test_with_nothing_pending_the_agent_sweeps_to_the_room_seen_longest_ago():
     made.pyboy.memory[0xCC39] = 0xFF
     obs = SimpleNamespace(room="A", x=10, y=20, facing="up")
     assert made.decide(obs, node, here, "Go to a new room.")[:2] == (here[1], "sweep")
+
+
+def test_an_untaken_way_into_the_landmark_comes_before_the_known_path():
+    made = agent()
+    made.target = "T"
+    options = [option("exit:B", "exit", "B"), option("exit:T/3", "exit", "T")]
+    node = node_of("A", options)
+    made.memory.arrive(node, options)
+    made.memory.record(node, "exit:B")
+    made.memory.edges[node] = {"exit:B": "B@0"}
+    made.memory.edges["B@0"] = {"exit:T/1": "T@0"}
+    chosen, origin, _ = made.decide(OBS, node, options, "Go east.")
+    assert (chosen.id, origin) == ("exit:T/3", "route")
+
+
+def test_a_part_of_the_landmark_with_nothing_left_is_not_a_destination_again():
+    made = agent()
+    made.landmark = "T"
+    options = [option("exit:A/1", "exit", "A")]
+    node = node_of("T", options)
+    made.memory.arrive(node, options)
+    made.memory.record(node, "exit:A/1")
+    made.decide(SimpleNamespace(room="T", x=1, y=1, facing="up"), node, options, "Walk into the event.")
+    assert made.memory.current["spent"] == [node]
+    made.landmark, made.target = None, "T"
+    back = [option("exit:T/1", "exit", "T")]
+    here = node_of("A", back)
+    made.memory.arrive(here, back)
+    made.memory.record(here, "exit:T/1")
+    made.memory.edges[here] = {"exit:T/1": node}
+    _, origin, _ = made.decide(OBS, here, back, "Go north.")
+    assert origin != "route"
