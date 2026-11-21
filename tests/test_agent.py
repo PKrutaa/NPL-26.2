@@ -238,3 +238,17 @@ def test_an_exit_from_the_dungeon_to_an_unvisited_overworld_room_is_the_way_forw
     made.memory.record(node, "exit:04:06")
     chosen, origin, _ = made.decide(OBS, node, options, "Go to a new room.")
     assert (chosen.id, origin) == ("exit:01:38", "forced")
+
+
+def test_with_nothing_pending_the_agent_sweeps_to_the_room_seen_longest_ago():
+    made = agent()
+    here = [option("exit:B", "exit", "B"), option("exit:C", "exit", "C")]
+    node = node_of("A", here)
+    made.memory.arrive(node, here)
+    for name in ("exit:B", "exit:C"):
+        made.memory.record(node, name)
+    made.memory.edges[node] = {"exit:B": "B@0", "exit:C": "C@0"}
+    made.memory.last_seen = {"A": 50, "B": 40, "C": 10}
+    made.pyboy.memory[0xCC39] = 0xFF
+    obs = SimpleNamespace(room="A", x=10, y=20, facing="up")
+    assert made.decide(obs, node, here, "Go to a new room.")[:2] == (here[1], "sweep")

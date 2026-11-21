@@ -36,6 +36,7 @@ ROOM_REVISITS = 8  # times per story state a dungeon room's actions become avail
 LONG_WINDOW, LONG_REPEATS = 80, 6  # one move made this many times within that many decisions
 LOOP_WINDOW, LOOP_MOVES = 12, 4  # that many decisions made of at most this many distinct moves
 RECIPE_STEPS = 12
+SWEEP_LIMIT = 80  # sweep decisions without story progress before declaring an impasse
 MAX_HOPS = 14  # consecutive trips to a pending area with nothing new found
 SURVEY_LEVELS = (
     {"grid": 16, "stride": 16, "limit": 400, "pushes": False},
@@ -108,6 +109,7 @@ class Memory:
         self.opened = {}  # "area|option" -> exits that appeared after taking it
         self.dungeons = {}  # room -> dungeon index read when Link was there (255 outside one)
         self.recipes = {}  # "room|entered from|exit" -> what was done in the room to cross it
+        self.last_seen = {}  # room -> decision count when Link was last there
         self.decisions = 0  # carried across sessions, so a resumed trace keeps counting
         self.epoch = None
         self.current = None
@@ -304,7 +306,8 @@ class Memory:
         return {"format": MEMORY_FORMAT, "epochs": self.epochs, "edges": self.edges,
                 "banned": sorted(map(list, self.banned)), "epoch": self.epoch, "landmarks": self.landmarks,
                 "decisions": self.decisions, "areas": self.areas, "opened": self.opened,
-                "dungeons": self.dungeons, "recipes": self.recipes}
+                "dungeons": self.dungeons, "recipes": self.recipes,
+                "last_seen": self.last_seen}
 
     @classmethod
     def load(cls, data):
@@ -322,6 +325,7 @@ class Memory:
         memory.opened = data.get("opened", {})
         memory.dungeons = data.get("dungeons", {})
         memory.recipes = data.get("recipes", {})
+        memory.last_seen = data.get("last_seen", {})
         memory.current = memory.epochs[memory.epoch]
         return memory
 
@@ -367,6 +371,7 @@ class Agent:
         self.hops = 0
         self.trail = []
         self.undo = None
+        self.sweeps = 0
         self.entered_from = "start"  # the room Link was in before this one
         self.here = None
         self.done_here = []  # what was done in this room since coming in
@@ -565,6 +570,17 @@ class Agent:
                 if step:
                     self.hops += 1
                     return step, "recipe", {}
+            # Nothing is known to be pending. Sweep: head for the known room Link has not
+            # seen for the longest time, where a new look may find what changed.
+            stale_rooms = sorted((place for place in self.memory.last_seen
+                                  if place != obs.room and worth_a_trip(place)),
+                                 key=lambda place: self.memory.last_seen[place])
+            for place in stale_rooms[:3]:
+                first = self.memory.room_hop(obs.room, lambda name: name == place)
+                step = first and (next((option for option in usable if option.id == first), None)
+                                  or by_recipe(first))
+                if step:
+                    return step, "sweep", {}
         candidates = sorted(fresh or usable, key=lambda option: len(option.route))[:12]
         if not candidates:
             return None, "none", {}
@@ -603,9 +619,11 @@ class Agent:
         if self.memory.enter(progress(self.pyboy)) and self.decisions:
             self.since_progress = 0
             self.idle = 0
+            self.sweeps = 0
             if self.supervisor:
                 self.supervisor.progressed()
         self.memory.dungeons[obs.room] = self.pyboy.memory[DUNGEON_INDEX]
+        self.memory.last_seen[obs.room] = self.decisions
         if obs.room != self.here:
             self.entered_from, self.here, self.done_here = self.here or "start", obs.room, []
         name, hint = self.objective(obs.room)
@@ -709,6 +727,13 @@ class Agent:
                 execute(self.pyboy, "wait", render=self.watch)
             return self.empty <= 12
         self.empty = 0
+        if origin == "sweep":
+            self.sweeps += 1
+            if self.sweeps > SWEEP_LIMIT:
+                # Every known room was looked at again, several times, with nothing new.
+                self.write({"event": "impasse", "room": obs.room, "xy": [obs.x, obs.y], "objective": name,
+                            "after": "sweeps"})
+                return False
         if origin == "fallback":
             self.idle += 1
             # Dungeon rooms reset and have to be redone, so the rotation needs more room there.
