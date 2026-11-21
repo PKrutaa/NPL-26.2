@@ -618,7 +618,13 @@ class Agent:
                                   or by_recipe(first))
                 if step:
                     return step, "sweep", {}
-        candidates = sorted(fresh or usable, key=lambda option: len(option.route))[:12]
+        parts = [part.strip().lower()[:16] for part in hint.rstrip(".").split(" or ")]
+
+        def off_goal(option):
+            return not any(brief(option).lower().startswith(part) for part in parts)
+
+        # Laya sees at most twelve options. What the goal asks for is never the one cut.
+        candidates = sorted(fresh or usable, key=lambda option: (off_goal(option), len(option.route)))[:12]
         if not candidates:
             return None, "none", {}
 

@@ -301,3 +301,13 @@ def test_the_side_of_an_obstacle_is_told_only_when_no_exit_points_at_the_goal():
     made.memory.arrive(node, options)
     made.decide(OBS, node, options, "Go west.")
     assert "Use the item on the obstacle" in made.policy.asked[0].values()
+
+
+def test_what_the_goal_asks_for_is_never_cut_from_a_long_list():
+    made = agent()
+    options = [Option(f"talk:{index}", "interact", "x", (), None, "Talk to the character") for index in range(14)]
+    options.append(Option("exit:P", "exit", "x", (("up", 12),) * 9, "P", "Enter the door or stairs"))
+    node = node_of("A", options)
+    made.memory.arrive(node, options)
+    made.decide(OBS, node, options, "Enter the door or stairs.")
+    assert "Enter the door or stairs" in made.policy.asked[0].values()
