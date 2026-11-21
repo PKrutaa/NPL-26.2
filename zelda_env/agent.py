@@ -324,6 +324,7 @@ class Agent:
         self.last = None
         self.hops = 0
         self.trail = []
+        self.undo = None
         self.loops = 0
         self.damage = 0
         self.arrival = (None, None)  # (node left, option taken) for the last decision
@@ -569,9 +570,13 @@ class Agent:
             if level == len(SURVEY_LEVELS) - 2 and not owed and self.memory.hop(node, options):
                 break  # the finest pass is slow: keep it for when no other area has options
             level += 1
-            depth[examined] = max(depth.get(examined, 0), level)
-            options += [option for option in self.surveyor.options(self.pyboy, **SURVEY_LEVELS[level])
-                        if option.id not in found]
+            extra = [option for option in self.surveyor.options(self.pyboy, **SURVEY_LEVELS[level])
+                     if option.id not in found]
+            options += extra
+            if not extra:
+                # Only a closer look that found nothing more can be skipped next time:
+                # what it does find is not stored, so it has to be found again.
+                depth[examined] = max(depth.get(examined, 0), level)
         survey_seconds = time.perf_counter() - started
         # A scene that continues by itself is not a choice. Let it play and look again.
         scene = next((option for option in self.memory.fresh(node, options)
@@ -612,6 +617,17 @@ class Agent:
             # Usually a scene that started between two checks. Let it play, then look again.
             self.empty += 1
             self.write({"event": "no_options", "room": obs.room, "xy": [obs.x, obs.y], "streak": self.empty})
+            if self.empty >= 3 and self.undo:
+                # Link is shut in (a block pushed the wrong way). Go back to before the
+                # decision that did it, and never offer that decision there again.
+                state, place, name = self.undo
+                self.undo = None
+                self.pyboy.load_state(BytesIO(state))
+                self.memory.banned.add((place, name))
+                self.deaths += 1
+                self.empty = 0
+                self.write({"event": "undone", "room": obs.room, "dropped": name})
+                return True
             for _ in range(10):
                 execute(self.pyboy, "wait", render=self.watch)
             return self.empty <= 12
@@ -630,6 +646,7 @@ class Agent:
         before = BytesIO()
         self.pyboy.save_state(before)
         health, story = self.pyboy.memory[HEALTH], progress(self.pyboy)
+        self.undo = (before.getvalue(), node, option.id)
         self.memory.record(node, option.id)
         # Kept to notice, at the next survey, an option that makes new exits appear.
         self.last = (node, option.id, exits_now) if option.kind != "exit" else None
