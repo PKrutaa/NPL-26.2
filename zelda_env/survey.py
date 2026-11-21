@@ -289,6 +289,7 @@ class Surveyor:
                 room_layout(self.shadow) != base_layout or self._changed(base_progress, base_layout, "playing"))
 
         dug = set()
+        stretches = set()
         push_tries = {}
         base_collisions = bytes(pyboy.memory[COLLISIONS:COLLISIONS + 0xC0])
         foes = enemies(pyboy)
@@ -354,7 +355,27 @@ class Surveyor:
                     same_map = after.room[:2] == start.room[:2]
                     where = (f"the {COMPASS[direction]} edge of this screen" if same_map
                              else f"the doorway or stairs {bearing(start, before.x, before.y)}")
-                    add(f"exit:{after.room}", "exit", f"Leave through {where}", step, after.room,
+                    name = f"exit:{after.room}"
+                    if same_map:
+                        # Two gaps on one edge can lead to parts of the next screen that do not
+                        # connect. Name the exit by where its landing strip begins: walk along
+                        # the edge on the far side until something blocks. One open edge gets
+                        # one name wherever Link crosses it; separate gaps get separate names.
+                        upright = direction in ("up", "down")
+                        stretch = (after.room, direction, (before.x if upright else before.y) // 40)
+                        if stretch in stretches:
+                            continue
+                        stretches.add(stretch)
+                        landed = after
+                        for _ in range(20):
+                            if landed.mode != "playing":
+                                break
+                            moved, slid, _ = execute(self.shadow, "left" if upright else "up")
+                            if slid != "moved" or moved.room != after.room or moved.mode != "playing":
+                                break
+                            landed = moved
+                        name = f"exit:{after.room}/{(landed.x if upright else landed.y) // 16}"
+                    add(name, "exit", f"Leave through {where}", step, after.room,
                         short=(f"Go {COMPASS[direction]}" if same_map else
                                "Go outside" if after.room[:2] in OVERWORLD and start.room[:2] not in OVERWORLD
                                else "Enter the door or stairs"))

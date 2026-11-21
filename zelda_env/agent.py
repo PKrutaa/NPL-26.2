@@ -27,7 +27,7 @@ from .survey import ESSENCES, HEALTH, OVERWORLD, Surveyor, progress, run_route
 GLOBAL_FLAGS = 0xC6D0
 TREASURES = 0xC69A
 TEXT_DISPLAY_STATE = (7, 0xD0C0)
-MEMORY_FORMAT = 6
+MEMORY_FORMAT = 7
 TALKS_PER_CHARACTER = 3
 TOOL_USES_PER_AREA = 10
 GOAL_REUSES = 2  # times a known exit toward the goal is offered again per story state
@@ -210,9 +210,13 @@ class Memory:
         """Record the area Link is in, and how he got here."""
         if origin and via:
             self.edges.setdefault(origin, {})[via] = node
-            back = f"exit:{origin.split('@')[0]}"
-            if origin != node and node not in self.current["visited"] and any(o.id == back for o in options):
+            ways_back = sorted((option for option in options
+                                if option.kind == "exit" and option.destination == origin.split("@")[0]),
+                               key=lambda option: len(option.route))
+            if origin != node and node not in self.current["visited"] and ways_back:
                 # Screen edges normally work both ways. Do not spend a decision confirming it.
+                # With more than one gap back to that room, the nearest is the one Link used.
+                back = ways_back[0].id
                 self.edges.setdefault(node, {}).setdefault(back, origin)
                 self.current["tried"].setdefault(f"{node}|{back}", 1)
         if node not in self.current["visited"]:
