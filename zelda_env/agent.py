@@ -316,7 +316,7 @@ class Memory:
         memory = cls()
         memory.epochs, memory.edges = data["epochs"], data["edges"]
         for epoch in memory.epochs.values():
-            epoch["depth"] = {}  # only a cache of how closely each area was examined
+            epoch["depth"], epoch["plain"] = {}, {}  # only caches of how closely areas were examined
         memory.banned = {tuple(item) for item in data["banned"]}
         memory.epoch = data["epoch"]
         memory.landmarks = data.get("landmarks", {})
@@ -655,25 +655,29 @@ class Agent:
         examined = f"{node}#{hashlib.sha1(terrain).hexdigest()[:8]}"
         # An area with a single way out looks like a dead end. Narrow exits are what the
         # quick pass misses, so look closer once before accepting that.
-        dead_end = sum(option.kind == "exit" for option in options) <= 1 and not depth.get(examined)
+        plain = self.memory.current.setdefault("plain", {})  # terrain where a closer look added nothing
+        dead_end = sum(option.kind == "exit" for option in options) <= 1 and not plain.get(examined)
         # A dungeon room that reset needs the closer look again: pushes are only found there.
         dead_end = dead_end or bool(back_in_dungeon)
         while level < len(SURVEY_LEVELS) - 1 and (dead_end or not self.memory.fresh(node, options)):
             found = {option.id for option in options}
             owed = [item for item in self.memory.current["pending"].get(node, []) if item not in found]
             forced, dead_end = dead_end, False
-            if depth.get(examined, 0) > level and not owed and not (forced and back_in_dungeon):
-                break  # the deeper passes already ran here and left nothing to do
-            if level == len(SURVEY_LEVELS) - 2 and not owed and self.memory.hop(node, options):
+            finest = level == len(SURVEY_LEVELS) - 2  # the next pass is the slowest one
+            if finest and depth.get(examined) and not owed:
+                break  # the finest pass already ran on this terrain and found nothing more
+            if finest and not owed and self.memory.hop(node, options):
                 break  # the finest pass is slow: keep it for when no other area has options
             level += 1
             extra = [option for option in self.surveyor.options(self.pyboy, **SURVEY_LEVELS[level])
                      if option.id not in found]
             options += extra
-            if not extra:
-                # Only a closer look that found nothing more can be skipped next time:
-                # what it does find is not stored, so it has to be found again.
-                depth[examined] = max(depth.get(examined, 0), level)
+            if not extra and level == 1:
+                plain[examined] = True
+            if not extra and level == len(SURVEY_LEVELS) - 1:
+                # Only the finest pass is remembered, and only when it found nothing more.
+                # What a pass does find is not stored, so it has to be found again.
+                depth[examined] = level
         survey_seconds = time.perf_counter() - started
         # A scene that continues by itself is not a choice. Let it play and look again.
         scene = next((option for option in self.memory.fresh(node, options)
