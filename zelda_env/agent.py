@@ -555,10 +555,10 @@ class Agent:
         # A dungeon room that reset needs the closer look again: pushes are only found there.
         dead_end = dead_end or bool(back_in_dungeon)
         while level < len(SURVEY_LEVELS) - 1 and (dead_end or not self.memory.fresh(node, options)):
-            dead_end = False
             found = {option.id for option in options}
             owed = [item for item in self.memory.current["pending"].get(node, []) if item not in found]
-            if depth.get(examined, 0) > level and not owed:
+            forced, dead_end = dead_end, False
+            if depth.get(examined, 0) > level and not owed and not (forced and back_in_dungeon):
                 break  # the deeper passes already ran here and left nothing to do
             if level == len(SURVEY_LEVELS) - 2 and not owed and self.memory.hop(node, options):
                 break  # the finest pass is slow: keep it for when no other area has options
