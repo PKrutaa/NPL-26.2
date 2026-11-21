@@ -583,6 +583,12 @@ class Agent:
             self.write({"event": "scene", "room": obs.room, "id": scene.id})
             return True
         self.memory.arrive(node, options)
+        if getattr(self, "focus", None) is not None and self.pyboy.memory[DUNGEON_INDEX] == self.focus:
+            # Leaving the dungeon of the objective is not offered here, so it must not
+            # count as something pending either, or it keeps calling Link back to the door.
+            ways_out = {item.id for item in options if item.kind == "exit" and item.destination[:2] in OVERWORLD}
+            self.memory.current["pending"][node] = [
+                name for name in self.memory.current["pending"].get(node, []) if name not in ways_out]
         exits_now = {item.id for item in options if item.kind == "exit"}
         if self.last and self.last[0] == node and exits_now - self.last[2]:
             self.memory.unlocked(node, self.last[1], exits_now - self.last[2])
