@@ -545,7 +545,7 @@ class Agent:
             # rooms reset when Link leaves, and the dirt he dug is back. Bounded per area.
             tasks = [part.strip().lower() for part in hint.rstrip(".").split(" or ")]
             again = [option for option in usable if option not in fresh and option.kind != "exit"
-                     and not (":talk:" in option.id and self.memory.tries(room, option.id) >= TALKS_PER_CHARACTER)
+                     and self.memory.tries(room, option.id) < TALKS_PER_CHARACTER
                      and any((option.short or "").lower().startswith(task[:16]) for task in tasks)]
             if again and not any((option.short or "").lower().startswith(task[:16])
                                  for option in fresh for task in tasks):
