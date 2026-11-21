@@ -216,11 +216,12 @@ class Memory:
         if option_id in pending:
             pending.remove(option_id)
 
-    def hop(self, node, options, allowed=None, leaving=False):
+    def hop(self, node, options, allowed=None, leaving=False, to=None):
         """First step of the shortest known path to somewhere worth going.
 
         By default that is an area with untried options, limited to rooms that pass
         `allowed`. With `leaving`, it is any area that has a known exit to the overworld.
+        With `to`, it is that room.
         """
         available = {option.id for option in options if (node, option.id) not in self.banned}
         queue = deque((destination, option_id) for option_id, destination in self.edges.get(node, {}).items()
@@ -232,7 +233,10 @@ class Memory:
                 continue
             seen.add(current)
             room = current.split("@")[0]
-            if leaving:
+            if to:
+                if room == to:
+                    return first
+            elif leaving:
                 if room[:2] in OVERWORLD:
                     return first
             elif self.current["pending"].get(current) and (allowed is None or allowed(room)):
@@ -308,6 +312,7 @@ class Agent:
 
     def objective(self, room=None):
         """Current objective and a short goal: a direction to the next landmark, or what to do."""
+        self.target = None
         for name, steps, elsewhere, reached, *where in OBJECTIVES:
             if reached(self.pyboy):
                 continue
@@ -330,6 +335,7 @@ class Agent:
                     state.update(step=state["step"] + 1, arrived=False)
                     continue
                 where = heading(room, target)
+                self.target = target if where else None
                 return name, (f"Go {where}." if where else elsewhere)
             return name, elsewhere
         return None, "Explore."
@@ -413,6 +419,13 @@ class Agent:
         reused = self.memory.current.setdefault("reused", {})
         ways = [option for option in usable if option.kind == "exit" and option not in fresh
                 and reused.get(f"{room}|{option.id}", 0) < GOAL_REUSES]
+        target = getattr(self, "target", None)
+        if target and self.hops < MAX_HOPS:
+            # Link has been to the landmark before: follow the map he built, not the compass.
+            first = self.memory.hop(room, options, to=target)
+            if first:
+                self.hops += 1
+                return next(option for option in usable if option.id == first), "route", {}
         if hint.startswith("Go "):
             wanted = hint[3:-1].split(" or ")
             if len(wanted) > 1:

@@ -211,3 +211,14 @@ def test_the_dungeon_of_the_objective_is_entered_at_once_and_not_left():
     made.memory.arrive(node, inside)
     chosen, origin, _ = made.decide(OBS, node, inside, "Go to a new room.")
     assert (chosen.id, origin) == ("push:1", "forced")
+
+
+def test_a_landmark_already_visited_is_reached_by_the_known_map():
+    made = agent()
+    here = [option("exit:B", "exit", "B"), option("exit:C", "exit", "C")]
+    node = node_of("A", here)
+    made.memory.arrive(node, here)
+    made.memory.edges[node] = {"exit:C": "C@0"}
+    made.memory.edges["C@0"] = {"exit:T": "T@0"}
+    made.target = "T"
+    assert made.decide(OBS, node, here, "Go north.")[:2] == (here[1], "route")
