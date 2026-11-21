@@ -179,3 +179,18 @@ def test_way_out_follows_the_known_map_and_trips_skip_other_interiors():
     memory.current["pending"][back_node] = ["talk"]
     assert memory.hop(hall_node, hall) == "exit:04:e8"
     assert memory.hop(hall_node, hall, lambda room: room.startswith("01:")) is None
+
+
+def test_coming_back_to_a_dungeon_room_makes_its_actions_available_again():
+    memory = Memory()
+    push, door = Option("push:7:4:up", "push", "push", ()), Option("exit:N", "exit", "north", (), "N")
+    node = memory.area("A", [door])
+    memory.arrive(node, [push, door])
+    memory.record(node, push.id)
+    memory.record(node, door.id)
+    memory.revisit(node)
+    assert memory.fresh(node, [push, door]) == [push]  # the exit stays known
+    for _ in range(10):
+        memory.record(node, push.id)
+        memory.revisit(node)
+    assert memory.fresh(node, [push, door]) == []  # the limit holds

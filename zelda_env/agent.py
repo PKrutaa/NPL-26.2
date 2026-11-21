@@ -32,6 +32,7 @@ TALKS_PER_CHARACTER = 3
 TOOL_USES_PER_AREA = 10
 GOAL_REUSES = 2  # times a known exit toward the goal is offered again per story state
 TASK_REDOS = 30  # decisions per area and story state that may redo what the task asks
+ROOM_REVISITS = 8  # times per story state a dungeon room's actions become available again
 MAX_HOPS = 14  # consecutive trips to a pending area with nothing new found
 SURVEY_LEVELS = (
     {"grid": 16, "stride": 16, "limit": 400, "pushes": False},
@@ -209,6 +210,17 @@ class Memory:
         if node not in self.current["visited"]:
             self.current["visited"].append(node)
         self.current["pending"][node] = [option.id for option in self.fresh(node, options)]
+
+    def revisit(self, node):
+        """Rooms of a dungeon reset when Link leaves. On coming back, what was done in the
+        room counts as not done, a limited number of times per story state."""
+        visits = self.current.setdefault("visits", {})
+        visits[node] = visits.get(node, 0) + 1
+        if visits[node] > ROOM_REVISITS:
+            return
+        for key in [key for key in self.current["tried"]
+                    if key.startswith(f"{node}|") and not key.split("|", 1)[1].startswith("exit:")]:
+            del self.current["tried"][key]
 
     def record(self, node, option_id):
         key = f"{node}|{option_id}"
@@ -524,8 +536,12 @@ class Agent:
         node = self.memory.area(obs.room, options)
         # Record the arrival first: it marks the way back as known, and the decision to
         # look deeper must not count that exit as something new.
+        came_from = self.arrival[0]
         self.memory.arrive(node, options, *self.arrival)
         self.arrival = (None, None)
+        if (came_from and came_from != node and getattr(self, "focus", None) is not None
+                and self.pyboy.memory[DUNGEON_INDEX] == self.focus):
+            self.memory.revisit(node)
         depth = self.memory.current.setdefault("depth", {})
         level = 0
         # How closely an area was examined holds only while its terrain is the same:
