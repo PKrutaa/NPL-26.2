@@ -534,11 +534,18 @@ class Agent:
 
         def by_recipe(exit_id):
             """The next thing to do here to get through an exit that is closed right now."""
+            done = getattr(self, "done_here", ())
             steps = self.memory.recipe(obs.room, getattr(self, "entered_from", "start"), exit_id)
             for step in steps or ():
-                if step not in getattr(self, "done_here", ()):
+                if step not in done:
                     return next((option for option in usable if option.id == step), None)
-            return None
+            # No recipe yet. Use what is known to have opened this exit, then anything in
+            # the room not done on this visit: one of them is what opens it.
+            openers = [key.split("|", 1)[1] for key, ways in self.memory.opened.items()
+                       if key.startswith(f"{obs.room}@") and exit_id in ways]
+            untried = [option for option in usable if option.kind != "exit" and option.id not in done]
+            return next((option for option in untried if option.id in openers), None) or next(
+                (option for option in untried if option.kind == "push"), None) or next(iter(untried), None)
 
         def worth_a_trip(place):
             # While the objective is in one dungeon, other interiors do not attract trips,
