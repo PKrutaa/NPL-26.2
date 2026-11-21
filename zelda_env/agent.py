@@ -68,7 +68,7 @@ OBJECTIVES = (
     ("maku-tree-salva", (("01:48", "Use the item on the ground or enter the door or stairs."),),
      "Go to a new room.",
      _flag(GLOBAL_FLAGS, 0x12), 0x0D),
-    ("chave-do-cemiterio", (("01:39", "Walk into the event."), ("00:38", "Talk to the character."),
+    ("chave-do-cemiterio", (("01:48", "Enter the door or stairs."), ("00:38", "Talk to the character."),
                             ("00:7c", "Enter the door or stairs.")),
      "Enter the door or stairs.", _flag(TREASURES, 0x42)),
     ("dungeon-1", (("00:8d", "Enter the door or stairs."),), "Enter the door or stairs.",
@@ -405,8 +405,11 @@ class Agent:
                     state["arrived"] = True
                     self.landmark = target
                     return name, task or elsewhere
-                if state["arrived"] and room[:2] != target[:2] and not last:
-                    # The task here was to go through something, and Link did.
+                onward = room[:2] == steps[state["step"] + 1][0][:2] if not last else False
+                if state["arrived"] and room[:2] != target[:2] and not last and (
+                        onward or room not in self.memory.dungeons):
+                    # The task here was to go through something, and Link did: he is on the
+                    # map of the next step, or somewhere he has never been.
                     state.update(step=state["step"] + 1, arrived=False)
                     continue
                 where = heading(room, target)
@@ -656,11 +659,11 @@ class Agent:
             self.sweeps = 0
             if self.supervisor:
                 self.supervisor.progressed()
-        self.memory.dungeons[obs.room] = self.pyboy.memory[DUNGEON_INDEX]
-        self.memory.last_seen[obs.room] = self.decisions
         if obs.room != self.here:
             self.entered_from, self.here, self.done_here = self.here or "start", obs.room, []
-        name, hint = self.objective(obs.room)
+        name, hint = self.objective(obs.room)  # before the room is recorded as seen
+        self.memory.dungeons[obs.room] = self.pyboy.memory[DUNGEON_INDEX]
+        self.memory.last_seen[obs.room] = self.decisions
         started = time.perf_counter()
         # A quick pass on 16-pixel steps first. The slower passes run only when the area
         # has nothing new, or still owes an option that only they can route to.
