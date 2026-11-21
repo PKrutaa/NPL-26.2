@@ -14,7 +14,7 @@ import json
 import platform
 import random
 import time
-from collections import deque
+from collections import Counter, deque
 from importlib.metadata import version
 from io import BytesIO
 from pathlib import Path
@@ -33,7 +33,9 @@ TOOL_USES_PER_AREA = 10
 GOAL_REUSES = 2  # times a known exit toward the goal is offered again per story state
 TASK_REDOS = 30  # decisions per area and story state that may redo what the task asks
 ROOM_REVISITS = 8  # times per story state a dungeon room's actions become available again
+LONG_WINDOW, LONG_REPEATS = 80, 6  # one move made this many times within that many decisions
 LOOP_WINDOW, LOOP_MOVES = 12, 4  # that many decisions made of at most this many distinct moves
+RECIPE_STEPS = 12
 MAX_HOPS = 14  # consecutive trips to a pending area with nothing new found
 SURVEY_LEVELS = (
     {"grid": 16, "stride": 16, "limit": 400, "pushes": False},
@@ -105,6 +107,7 @@ class Memory:
         self.areas = {}  # room -> exit sets of its separate parts
         self.opened = {}  # "area|option" -> exits that appeared after taking it
         self.dungeons = {}  # room -> dungeon index read when Link was there (255 outside one)
+        self.recipes = {}  # "room|entered from|exit" -> what was done in the room to cross it
         self.decisions = 0  # carried across sessions, so a resumed trace keeps counting
         self.epoch = None
         self.current = None
@@ -261,11 +264,47 @@ class Memory:
             queue.extend((destination, first) for destination in self.edges.get(current, {}).values())
         return None
 
+    def learn(self, room, entered_from, exit_id, steps):
+        """Remember what was done in a room between coming in one way and leaving another.
+        Dungeon rooms reset, so crossing them again means doing the same things again."""
+        key = f"{room}|{entered_from}|{exit_id}"
+        steps = [step for step in steps if not step.startswith("exit:")][-RECIPE_STEPS:]
+        if key not in self.recipes or len(steps) < len(self.recipes[key]):
+            self.recipes[key] = steps
+
+    def recipe(self, room, entered_from, exit_id):
+        exact = self.recipes.get(f"{room}|{entered_from}|{exit_id}")
+        if exact is not None:
+            return exact
+        others = [steps for key, steps in self.recipes.items()
+                  if key.startswith(f"{room}|") and key.endswith(f"|{exit_id}")]
+        return min(others, key=len) if others else None
+
+    def room_hop(self, room, wanted):
+        """First exit of the shortest path, room by room, to a room that `wanted` accepts.
+        It uses every exit ever seen in a room, whether or not it is open right now."""
+        links = {}
+        for node, exits in self.edges.items():
+            for option_id, destination in exits.items():
+                if option_id.startswith("exit:"):
+                    links.setdefault(node.split("@")[0], {})[option_id] = destination.split("@")[0]
+        queue = deque((destination, option_id) for option_id, destination in links.get(room, {}).items())
+        seen = {room}
+        while queue:
+            current, first = queue.popleft()
+            if current in seen:
+                continue
+            seen.add(current)
+            if wanted(current):
+                return first
+            queue.extend((destination, first) for destination in links.get(current, {}).values())
+        return None
+
     def dump(self):
         return {"format": MEMORY_FORMAT, "epochs": self.epochs, "edges": self.edges,
                 "banned": sorted(map(list, self.banned)), "epoch": self.epoch, "landmarks": self.landmarks,
                 "decisions": self.decisions, "areas": self.areas, "opened": self.opened,
-                "dungeons": self.dungeons}
+                "dungeons": self.dungeons, "recipes": self.recipes}
 
     @classmethod
     def load(cls, data):
@@ -282,6 +321,7 @@ class Memory:
         memory.areas = data.get("areas", {})
         memory.opened = data.get("opened", {})
         memory.dungeons = data.get("dungeons", {})
+        memory.recipes = data.get("recipes", {})
         memory.current = memory.epochs[memory.epoch]
         return memory
 
@@ -327,6 +367,9 @@ class Agent:
         self.hops = 0
         self.trail = []
         self.undo = None
+        self.entered_from = "start"  # the room Link was in before this one
+        self.here = None
+        self.done_here = []  # what was done in this room since coming in
         self.loops = 0
         self.damage = 0
         self.arrival = (None, None)  # (node left, option taken) for the last decision
@@ -448,6 +491,11 @@ class Agent:
             if first:
                 self.hops += 1
                 return next(option for option in usable if option.id == first), "route", {}
+            first = self.memory.room_hop(obs.room, lambda place: place == target)
+            step = first and next((option for option in usable if option.id == first), None)
+            if step:
+                self.hops += 1
+                return step, "route", {}
         if hint.startswith("Go "):
             wanted = hint[3:-1].split(" or ")
             if len(wanted) > 1:
@@ -477,6 +525,14 @@ class Agent:
                     fresh = [*fresh, *again]
         impasse = not fresh
 
+        def by_recipe(exit_id):
+            """The next thing to do here to get through an exit that is closed right now."""
+            steps = self.memory.recipe(obs.room, getattr(self, "entered_from", "start"), exit_id)
+            for step in steps or ():
+                if step not in getattr(self, "done_here", ()):
+                    return next((option for option in usable if option.id == step), None)
+            return None
+
         def worth_a_trip(place):
             # While the objective is in one dungeon, other interiors do not attract trips,
             # and from inside it nothing outside does.
@@ -496,6 +552,17 @@ class Agent:
             if first:
                 self.hops += 1
                 return next(option for option in usable if option.id == first), "frontier", {}
+            if self.hops < MAX_HOPS:
+                # No open path from this part of the room. Plan room by room, and reopen the
+                # way with what worked before.
+                pending_rooms = {name.split("@")[0] for name, items in self.memory.current["pending"].items()
+                                 if items}
+                first = self.memory.room_hop(obs.room, lambda place: place in pending_rooms and worth_a_trip(place))
+                step = first and (next((option for option in usable if option.id == first), None)
+                                  or by_recipe(first))
+                if step:
+                    self.hops += 1
+                    return step, "recipe", {}
         candidates = sorted(fresh or usable, key=lambda option: len(option.route))[:12]
         if not candidates:
             return None, "none", {}
@@ -537,6 +604,8 @@ class Agent:
             if self.supervisor:
                 self.supervisor.progressed()
         self.memory.dungeons[obs.room] = self.pyboy.memory[DUNGEON_INDEX]
+        if obs.room != self.here:
+            self.entered_from, self.here, self.done_here = self.here or "start", obs.room, []
         name, hint = self.objective(obs.room)
         started = time.perf_counter()
         # A quick pass on 16-pixel steps first. The slower passes run only when the area
@@ -550,8 +619,7 @@ class Agent:
         self.arrival = (None, None)
         back_in_dungeon = (came_from and came_from != node and getattr(self, "focus", None) is not None
                            and self.pyboy.memory[DUNGEON_INDEX] == self.focus)
-        if back_in_dungeon:
-            self.memory.revisit(node)
+        # Crossing a room that reset is done by recipe, not by treating everything as new.
         depth = self.memory.current.setdefault("depth", {})
         level = 0
         # How closely an area was examined holds only while its terrain is the same:
@@ -607,7 +675,11 @@ class Agent:
             # Stop offering them as new, forget what is pending, and decide again.
             self.trail.append((node, option.id))
             window = self.trail[-LOOP_WINDOW:]
-            if len(window) == LOOP_WINDOW and len(set(window)) <= LOOP_MOVES and origin != "fallback":
+            # A longer cycle shows up as one move made many times over a longer stretch.
+            often = Counter(self.trail[-LONG_WINDOW:]).most_common(1)[0][1] >= LONG_REPEATS
+            if often:
+                window = [move for move, count in Counter(self.trail[-LONG_WINDOW:]).items() if count >= 3]
+            if often or (len(window) == LOOP_WINDOW and len(set(window)) <= LOOP_MOVES and origin != "fallback"):
                 stale = self.memory.current.setdefault("stale", [])
                 stale.extend(f"{place}|{name}" for place, name in set(window) if f"{place}|{name}" not in stale)
                 self.memory.current["pending"].clear()
@@ -674,6 +746,11 @@ class Agent:
             outcome += f", lost {lost / 4:g} heart"
         if outcome != "failed, option dropped":
             self.arrival = (node, option.id)
+        if outcome != "failed, option dropped":
+            if after.room != obs.room and option.kind == "exit":
+                self.memory.learn(obs.room, self.entered_from, option.id, self.done_here)
+            elif after.room == obs.room:
+                self.done_here.append(option.id)
         self.recent.append(f"{option.description} -> {outcome}")
         reached = [item[0] for item in OBJECTIVES if item[3](self.pyboy) and item[0] not in self.done]
         self.done.extend(reached)

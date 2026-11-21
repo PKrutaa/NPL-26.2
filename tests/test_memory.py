@@ -194,3 +194,22 @@ def test_coming_back_to_a_dungeon_room_makes_its_actions_available_again():
         memory.record(node, push.id)
         memory.revisit(node)
     assert memory.fresh(node, [push, door]) == []  # the limit holds
+
+
+def test_a_room_crossing_is_remembered_as_a_recipe():
+    memory = Memory()
+    memory.learn("04:0c", "04:0d", "exit:04:0a", ["push:7:4:up"])
+    memory.learn("04:0c", "04:0d", "exit:04:0a", ["talk", "push:7:4:up", "dig"])  # longer: not kept
+    assert memory.recipe("04:0c", "04:0d", "exit:04:0a") == ["push:7:4:up"]
+    assert memory.recipe("04:0c", "elsewhere", "exit:04:0a") == ["push:7:4:up"]  # best known for that exit
+    assert memory.recipe("04:0c", "04:0d", "exit:04:0b") is None
+    assert Memory.load(json.loads(json.dumps(memory.dump()))).recipes == memory.recipes
+
+
+def test_room_by_room_planning_uses_exits_that_are_closed_now():
+    memory = Memory()
+    memory.edges["04:0d@0"] = {"exit:04:0c": "04:0c@0"}
+    memory.edges["04:0c@1"] = {"exit:04:0a": "04:0a@0"}  # seen from the far side of the block
+    assert memory.room_hop("04:0d", lambda room: room == "04:0a") == "exit:04:0c"
+    assert memory.room_hop("04:0c", lambda room: room == "04:0a") == "exit:04:0a"
+    assert memory.room_hop("04:0a", lambda room: room == "04:0d") is None
