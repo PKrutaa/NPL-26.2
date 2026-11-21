@@ -206,6 +206,7 @@ def test_the_dungeon_of_the_objective_is_entered_at_once_and_not_left():
     made.memory.record(node, "exit:04:0d")
     assert made.decide(OBS, node, outside, "Go to a new room.")[:2] == (outside[0], "route")
     made.pyboy.memory[0xCC39] = 0x0D
+    made.memory.dungeons["01:48"] = 0xFF  # the overworld room Link came in from
     inside = [Option("exit:01:48", "exit", "door", (), "01:48", "Go outside"), option("push:1")]
     node = node_of("04:0d", inside)
     made.memory.arrive(node, inside)
@@ -222,3 +223,17 @@ def test_a_landmark_already_visited_is_reached_by_the_known_map():
     made.memory.edges["C@0"] = {"exit:T": "T@0"}
     made.target = "T"
     assert made.decide(OBS, node, here, "Go north.")[:2] == (here[1], "route")
+
+
+def test_an_exit_from_the_dungeon_to_an_unvisited_overworld_room_is_the_way_forward():
+    made = agent()
+    made.focus = 0x0D
+    made.pyboy.memory[0xCC39] = 0x0D
+    made.memory.dungeons["04:06"] = 0x0D
+    options = [Option("exit:04:06", "exit", "west", (), "04:06", "Go west"),
+               Option("exit:01:38", "exit", "stairs", (), "01:38", "Go outside")]
+    node = node_of("04:07", options)
+    made.memory.arrive(node, options)
+    made.memory.record(node, "exit:04:06")
+    chosen, origin, _ = made.decide(OBS, node, options, "Go to a new room.")
+    assert (chosen.id, origin) == ("exit:01:38", "forced")

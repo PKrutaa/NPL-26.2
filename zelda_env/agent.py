@@ -458,8 +458,11 @@ class Agent:
             if self.pyboy.memory[DUNGEON_INDEX] == focus:
                 # The objective is in this dungeon. Leaving it is not a candidate while
                 # anything else can be done here.
+                # Going back out the way Link came in is what this prevents. An exit to an
+                # overworld room he has never been to is the way forward, and stays.
                 stay = [option for option in usable
-                        if not (option.kind == "exit" and option.destination[:2] in OVERWORLD)]
+                        if not (option.kind == "exit" and option.destination[:2] in OVERWORLD
+                                and option.destination in self.memory.dungeons)]
                 if stay:
                     usable, fresh = stay, [option for option in fresh if option in stay]
             else:
@@ -471,9 +474,8 @@ class Agent:
         def brief(option):
             text = option.short or option.description
             # An exit to a room not seen in this story state says so: goals can ask for it.
-            # Leaving for the overworld is never "a new room" of the place Link is exploring.
             fresh_room = option.kind == "exit" and option.destination not in seen
-            return f"{text} to a new room" if fresh_room and text.startswith("Go ") and text != "Go outside" else text
+            return f"{text} to a new room" if fresh_room and text.startswith("Go ") else text
 
         def toward(option, goal):
             text = brief(option)
@@ -661,7 +663,8 @@ class Agent:
         if getattr(self, "focus", None) is not None and self.pyboy.memory[DUNGEON_INDEX] == self.focus:
             # Leaving the dungeon of the objective is not offered here, so it must not
             # count as something pending either, or it keeps calling Link back to the door.
-            ways_out = {item.id for item in options if item.kind == "exit" and item.destination[:2] in OVERWORLD}
+            ways_out = {item.id for item in options if item.kind == "exit" and item.destination[:2] in OVERWORLD
+                        and item.destination in self.memory.dungeons}
             self.memory.current["pending"][node] = [
                 name for name in self.memory.current["pending"].get(node, []) if name not in ways_out]
         exits_now = {item.id for item in options if item.kind == "exit"}
