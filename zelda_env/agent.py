@@ -579,9 +579,9 @@ class Agent:
                     return step, "recipe", {}
             # Nothing is known to be pending. Sweep: head for the known room Link has not
             # seen for the longest time, where a new look may find what changed.
-            stale_rooms = sorted((place for place in self.memory.last_seen
+            stale_rooms = sorted((place for place in self.memory.dungeons
                                   if place != obs.room and worth_a_trip(place)),
-                                 key=lambda place: self.memory.last_seen[place])
+                                 key=lambda place: self.memory.last_seen.get(place, -1))
             for place in stale_rooms[:3]:
                 first = self.memory.room_hop(obs.room, lambda name: name == place)
                 step = first and (next((option for option in usable if option.id == first), None)

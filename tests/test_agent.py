@@ -248,7 +248,8 @@ def test_with_nothing_pending_the_agent_sweeps_to_the_room_seen_longest_ago():
     for name in ("exit:B", "exit:C"):
         made.memory.record(node, name)
     made.memory.edges[node] = {"exit:B": "B@0", "exit:C": "C@0"}
-    made.memory.last_seen = {"A": 50, "B": 40, "C": 10}
+    made.memory.last_seen = {"A": 50, "B": 40}
+    made.memory.dungeons = {"A": 0xFF, "B": 0xFF, "C": 0xFF}  # C is known but has no record: oldest
     made.pyboy.memory[0xCC39] = 0xFF
     obs = SimpleNamespace(room="A", x=10, y=20, facing="up")
     assert made.decide(obs, node, here, "Go to a new room.")[:2] == (here[1], "sweep")
