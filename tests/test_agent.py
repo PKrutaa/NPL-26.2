@@ -185,6 +185,7 @@ def test_a_known_exit_toward_the_goal_is_offered_again_a_limited_number_of_times
     node = node_of("04:e7", options)
     made.memory.arrive(node, options)
     made.memory.record(node, "exit:01:76")  # Link came in through it, so it is not new
+    made.memory.arrive(node_of("01:76", []), [])
     offered = []
     made.policy.choose = lambda context, criteria: (
         offered.append(set(criteria.values())) or next(k for k, v in criteria.items() if v == "Go outside"), {})
