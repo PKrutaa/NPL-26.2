@@ -152,6 +152,36 @@ Nas primeiras execuções Link terminava com meio coração de três, sem nenhum
 
 O workflow rodou no GitHub nos três sistemas e passou: instalação do perfil base, compilação, ajuda de todas as CLIs, testes unitários e a checagem de erro com ROM ausente. Isso cobre Windows e Ubuntu só nesses pontos. ROM, janela, save e Laya não foram executados nessas plataformas.
 
+## Terceira rodada: sessão contínua até a Maku Tree salva
+
+Uma única sessão, iniciada no boot e retomada várias vezes do próprio estado salvo, concluiu cinco objetivos: `espada`, `maku-tree`, `passado`, `pa` e `maku-tree-salva`. O último exige atravessar o Maku Path do passado inteiro.
+
+| Trecho do Maku Path do passado | O que o agente fez |
+| --- | --- |
+| Portão em `01:48` | Cavou os montes de terra com a pá e entrou. |
+| `04:0c` | Empurrou o bloco que fecha a passagem. |
+| `04:0a` | Saiu do cercado de blocos e venceu três morcegos. |
+| `04:0b` | Venceu três inimigos. A porta norte abre depois da última luta. |
+| `04:08` | Empurrou três blocos sobre buracos, abriu o baú e pegou a chave pequena. |
+| `04:0a`, porta oeste | Abriu a porta trancada com a chave. |
+| `04:09` | Empurrou cinco blocos e subiu a escada para a sala lateral `06:05`, onde pegou um item. |
+| `04:06` e `04:07` | Venceu dois inimigos e tomou a saída para `01:38`. |
+| `01:38` | Venceu os dois inimigos que atacavam a Maku Tree. A flag do jogo de árvore salva ficou ligada. |
+
+Link terminou com 3 de 3 corações.
+
+Esta sessão não serve como medida de custo nem como prova de ausência de ciclos. Ela somou 1.497 decisões porque o código foi corrigido ao longo dela, e várias centenas de decisões foram gastas em ciclos que as correções depois eliminaram. Os ciclos observados e o que os resolveu:
+
+| Ciclo observado | Causa | Correção |
+| --- | --- | --- |
+| Vai e volta entre `04:0d` e `04:0c` empurrando o mesmo bloco | A saída para fora da dungeon contava como pendência na sala da entrada e atraía viagens de volta. | A saída não conta como pendência dentro da dungeon do objetivo. Detector de ciclo curto. |
+| Refazer as onze empurradas de `04:09` a cada visita | Regra que tornava novas todas as ações de uma sala revisitada. | Regra removida. Receitas de travessia. Detector de ciclo longo. |
+| Vai e volta de varredura entre as duas salas da entrada | A varredura só considerava salas com registro de última visita. | A varredura considera todas as salas conhecidas. |
+| "Sem opções" em `04:09` com empurradas disponíveis | Cache de área examinada pulava a camada do levantamento que encontra empurrões. | Cada cache vale só para a própria camada e é descartado ao carregar a sessão. |
+| Saída para a Maku Tree nunca tomada | Regra que proibia sair da dungeon do objetivo. | A regra barra só saídas para salas já visitadas. |
+
+Uma execução do boot com o código final, sem correções no meio, é necessária para medir decisões por objetivo e contar ciclos. Ela está descrita na seção seguinte quando disponível.
+
 ## Estado em relação à spec
 
 | Item da spec | Estado |
