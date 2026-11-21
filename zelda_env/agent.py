@@ -539,8 +539,9 @@ class Agent:
         came_from = self.arrival[0]
         self.memory.arrive(node, options, *self.arrival)
         self.arrival = (None, None)
-        if (came_from and came_from != node and getattr(self, "focus", None) is not None
-                and self.pyboy.memory[DUNGEON_INDEX] == self.focus):
+        back_in_dungeon = (came_from and came_from != node and getattr(self, "focus", None) is not None
+                           and self.pyboy.memory[DUNGEON_INDEX] == self.focus)
+        if back_in_dungeon:
             self.memory.revisit(node)
         depth = self.memory.current.setdefault("depth", {})
         level = 0
@@ -551,6 +552,8 @@ class Agent:
         # An area with a single way out looks like a dead end. Narrow exits are what the
         # quick pass misses, so look closer once before accepting that.
         dead_end = sum(option.kind == "exit" for option in options) <= 1 and not depth.get(examined)
+        # A dungeon room that reset needs the closer look again: pushes are only found there.
+        dead_end = dead_end or bool(back_in_dungeon)
         while level < len(SURVEY_LEVELS) - 1 and (dead_end or not self.memory.fresh(node, options)):
             dead_end = False
             found = {option.id for option in options}
