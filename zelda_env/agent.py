@@ -31,6 +31,7 @@ MEMORY_FORMAT = 6
 TALKS_PER_CHARACTER = 3
 TOOL_USES_PER_AREA = 10
 GOAL_REUSES = 2  # times a known exit toward the goal is offered again per story state
+TASK_REDOS = 30  # decisions per area and story state that may redo what the task asks
 MAX_HOPS = 14  # consecutive trips to a pending area with nothing new found
 SURVEY_LEVELS = (
     {"grid": 16, "stride": 16, "limit": 400, "pushes": False},
@@ -441,6 +442,18 @@ class Agent:
                 first = self.memory.hop(room, options, leaving=True)
                 if first:
                     return next(option for option in usable if option.id == first), "route", {}
+        else:
+            # At a landmark the goal is a task. What matches the task can be done again:
+            # rooms reset when Link leaves, and the dirt he dug is back. Bounded per area.
+            tasks = [part.strip().lower() for part in hint.rstrip(".").split(" or ")]
+            again = [option for option in usable if option not in fresh and option.kind != "exit"
+                     and any((option.short or "").lower().startswith(task[:16]) for task in tasks)]
+            if again and not any((option.short or "").lower().startswith(task[:16])
+                                 for option in fresh for task in tasks):
+                done = self.memory.current.setdefault("redone", {})
+                if done.get(room, 0) < TASK_REDOS:
+                    done[room] = done.get(room, 0) + 1
+                    fresh = [*fresh, *again]
         impasse = not fresh
 
         def worth_a_trip(place):
