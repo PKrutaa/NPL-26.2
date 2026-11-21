@@ -67,7 +67,7 @@ OBJECTIVES = (
      "Enter the door or stairs.", _flag(TREASURES, 0x42)),
     ("dungeon-1", (("00:8d", "Enter the door or stairs."),), "Enter the door or stairs.",
      lambda pyboy: bool(pyboy.memory[GROUP4_ROOM_FLAGS + 0x24] & ROOM_VISITED)),
-    ("essencia-1", (), "Go to a new room.", lambda pyboy: bool(pyboy.memory[ESSENCES] & 1)),
+    ("essencia-1", (), "Go to a new room.", lambda pyboy: bool(pyboy.memory[ESSENCES] & 1), 0x01),
     ("oito-essencias", (), "Go to a new room.", lambda pyboy: pyboy.memory[ESSENCES] == 0xFF),
 )
 
@@ -379,6 +379,23 @@ class Agent:
         usable = [option for option in options if (room, option.id) not in self.memory.banned]
         fresh = self.memory.fresh(room, options)
         seen = {name.split("@")[0] for name in self.memory.current["visited"]}
+        focus = getattr(self, "focus", None)
+        if focus is not None:
+            def into_focus(option):
+                return option.kind == "exit" and self.memory.dungeons.get(option.destination) == focus
+
+            if self.pyboy.memory[DUNGEON_INDEX] == focus:
+                # The objective is in this dungeon. Leaving it is not a candidate while
+                # anything else can be done here.
+                stay = [option for option in usable
+                        if not (option.kind == "exit" and option.destination[:2] in OVERWORLD)]
+                if stay:
+                    usable, fresh = stay, [option for option in fresh if option in stay]
+            else:
+                # A known way into the dungeon of the objective is taken at once.
+                door = next((option for option in usable if into_focus(option)), None)
+                if door:
+                    return door, "route", {}
 
         def brief(option):
             text = option.short or option.description
@@ -412,11 +429,13 @@ class Agent:
                 if first:
                     return next(option for option in usable if option.id == first), "route", {}
         impasse = not fresh
-        focus = getattr(self, "focus", None)
 
         def worth_a_trip(place):
-            # While the objective is in one dungeon, other interiors do not attract trips.
-            return focus is None or place[:2] in OVERWORLD or self.memory.dungeons.get(place) == focus
+            # While the objective is in one dungeon, other interiors do not attract trips,
+            # and from inside it nothing outside does.
+            if focus is None or self.memory.dungeons.get(place) == focus:
+                return True
+            return place[:2] in OVERWORLD and self.pyboy.memory[DUNGEON_INDEX] != focus
 
         if not impasse:
             self.hops = 0

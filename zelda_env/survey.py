@@ -481,6 +481,8 @@ class Surveyor:
                         pushed, _ = run_route(self.shadow, probe)
                         if self.shadow.memory[HEALTH] < health - tolerance:
                             break
+                        if pushed.room != start.room:
+                            break  # walked off the screen: that is an exit, not a push
                         if not self._pushed(entity, pushed, base_progress, base_layout):
                             continue
                         if self._hurt_after(health - tolerance):

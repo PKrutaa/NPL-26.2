@@ -36,7 +36,7 @@ class Sup:
 def agent(policy=None, supervisor=None, **options):
     made = Agent.__new__(Agent)
     made.policy, made.supervisor, made.memory = policy or Laya(), supervisor, Memory()
-    made.pyboy = SimpleNamespace(memory={0xC6AA: 12, 0xC6AB: 12})
+    made.pyboy = SimpleNamespace(memory={0xC6AA: 12, 0xC6AB: 12, 0xCC39: 0xFF})
     made.hops = 0
     made.stall, made.since_progress, made.decisions, made.recent = options.get("stall", 20), 0, 0, []
     return made
@@ -194,3 +194,20 @@ def test_a_known_exit_toward_the_goal_is_offered_again_a_limited_number_of_times
     made.policy.choose = lambda context, criteria: (offered.append(set(criteria.values())) or sorted(criteria)[0], {})
     made.decide(OBS, node, options, "Go outside.")
     assert "Go outside" in offered[0] and "Go outside" in offered[1] and "Go outside" not in offered[2]
+
+
+def test_the_dungeon_of_the_objective_is_entered_at_once_and_not_left():
+    made = agent()
+    made.focus = 0x0D
+    made.memory.dungeons["04:0d"] = 0x0D
+    outside = [Option("exit:04:0d", "exit", "door", (), "04:0d", "Enter the door or stairs"), option("talk:1")]
+    node = node_of("01:48", outside)
+    made.memory.arrive(node, outside)
+    made.memory.record(node, "exit:04:0d")
+    assert made.decide(OBS, node, outside, "Go to a new room.")[:2] == (outside[0], "route")
+    made.pyboy.memory[0xCC39] = 0x0D
+    inside = [Option("exit:01:48", "exit", "door", (), "01:48", "Go outside"), option("push:1")]
+    node = node_of("04:0d", inside)
+    made.memory.arrive(node, inside)
+    chosen, origin, _ = made.decide(OBS, node, inside, "Go to a new room.")
+    assert (chosen.id, origin) == ("push:1", "forced")
