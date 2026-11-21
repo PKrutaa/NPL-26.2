@@ -33,6 +33,7 @@ TOOL_USES_PER_AREA = 10
 GOAL_REUSES = 2  # times a known exit toward the goal is offered again per story state
 TASK_REDOS = 30  # decisions per area and story state that may redo what the task asks
 ROOM_REVISITS = 8  # times per story state a dungeon room's actions become available again
+LOOP_WINDOW, LOOP_MOVES = 12, 4  # that many decisions made of at most this many distinct moves
 MAX_HOPS = 14  # consecutive trips to a pending area with nothing new found
 SURVEY_LEVELS = (
     {"grid": 16, "stride": 16, "limit": 400, "pushes": False},
@@ -190,6 +191,8 @@ class Memory:
         def reopens(option):
             # Some rooms reset when Link leaves. What opened a way before is worth doing
             # again whenever that way is closed.
+            if f"{node}|{option.id}" in self.current.get("stale", []):
+                return False  # it was part of a loop: no longer something to redo
             ways = self.opened.get(f"{node}|{option.id}")
             return bool(ways) and not set(ways) <= offered
 
@@ -219,7 +222,8 @@ class Memory:
         if visits[node] > ROOM_REVISITS:
             return
         for key in [key for key in self.current["tried"]
-                    if key.startswith(f"{node}|") and not key.split("|", 1)[1].startswith("exit:")]:
+                    if key.startswith(f"{node}|") and not key.split("|", 1)[1].startswith("exit:")
+                    and key not in self.current.get("stale", [])]:
             del self.current["tried"][key]
 
     def record(self, node, option_id):
@@ -319,6 +323,8 @@ class Agent:
         self.scenes = 0
         self.last = None
         self.hops = 0
+        self.trail = []
+        self.loops = 0
         self.damage = 0
         self.arrival = (None, None)  # (node left, option taken) for the last decision
         self.done = [item[0] for item in OBJECTIVES if item[3](pyboy)]
@@ -583,6 +589,19 @@ class Agent:
         started = time.perf_counter()
         option, origin, details = self.decide(obs, node, options, hint)
         choice_seconds = time.perf_counter() - started
+        if option is not None:
+            # Whatever the rules above say, the same few moves over and over is a loop.
+            # Stop offering them as new, forget what is pending, and decide again.
+            self.trail.append((node, option.id))
+            window = self.trail[-LOOP_WINDOW:]
+            if len(window) == LOOP_WINDOW and len(set(window)) <= LOOP_MOVES and origin != "fallback":
+                stale = self.memory.current.setdefault("stale", [])
+                stale.extend(f"{place}|{name}" for place, name in set(window) if f"{place}|{name}" not in stale)
+                self.memory.current["pending"].clear()
+                self.trail.clear()
+                self.loops += 1
+                self.write({"event": "loop_cut", "room": obs.room, "moves": sorted(name for _, name in set(window))})
+                option, origin, details = self.decide(obs, node, options, hint)
         if option is None:
             # Usually a scene that started between two checks. Let it play, then look again.
             self.empty += 1
@@ -657,7 +676,7 @@ class Agent:
             "rooms_visited": len({node.split("@")[0] for epoch in self.memory.epochs.values()
                                   for node in epoch["visited"]}),
             "story_states": len(self.memory.epochs), "deaths_or_retries": self.deaths,
-            "scenes_waited": self.scenes, "health": [self.pyboy.memory[HEALTH], self.pyboy.memory[HEALTH + 1]],
+            "scenes_waited": self.scenes, "loops_cut": self.loops, "health": [self.pyboy.memory[HEALTH], self.pyboy.memory[HEALTH + 1]],
             "quarter_hearts_lost": self.damage,
             "max_repeats_of_one_option_in_one_story_state": max(tried, default=0),
             "supervisor": self.supervisor.stats if self.supervisor else None,
