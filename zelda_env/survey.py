@@ -237,6 +237,8 @@ class Surveyor:
         self._load(root)
         run_route(self.shadow, (("wait", 30),))
         self.volatile = room_layout(self.shadow) != base_layout
+        # The same for save data: a flag the room sets by itself is not an effect of a probe.
+        base_progress = progress(self.shadow)
         health = pyboy.memory[HEALTH]
         found = {}
         poked = set()
@@ -251,10 +253,11 @@ class Surveyor:
 
         def linger(state, route, here):
             self._load(state)
+            before_wait = (progress(self.shadow), room_layout(self.shadow))
             probe = (("wait", 150),)
             waited, _ = run_route(self.shadow, probe)
             if self.shadow.memory[HEALTH] >= health - tolerance and waited.room == start.room and self._changed(
-                    base_progress, base_layout, "playing"):
+                    *before_wait, "playing"):
                 # Named by the effect, so one event seen from many spots is one option.
                 effect = hashlib.sha1(progress(self.shadow) + waited.mode.encode()).hexdigest()[:6]
                 spot = f"text{self._text():04x}" if waited.mode == "dialogue" else effect
@@ -318,8 +321,12 @@ class Surveyor:
             for direction in DIRECTIONS:
                 self._load(state)
                 before = observe(self.shadow)
+                # Every probe is judged against the moment right before it, not against the
+                # start of the survey: a door that shuts behind Link is not an effect of a probe.
+                before_step = progress(self.shadow)
                 after, event, _ = execute(self.shadow, direction, hold_frames=stride)
                 responded |= event != "blocked" or after.mode != "playing"
+                base_progress, base_layout = progress(self.shadow), room_layout(self.shadow)
                 step = (*route, (direction, stride))
                 if self.shadow.memory[HEALTH] < health - tolerance:
                     continue  # do not plan a route that costs more health than allowed
@@ -361,13 +368,25 @@ class Surveyor:
                     continue
                 dx, dy = DELTA[direction]
                 if event == "moved":
-                    if progress(self.shadow) != base_progress:
-                        # Walking here changed the save data: a key or another item was picked up.
-                        effect = hashlib.sha1(progress(self.shadow)).hexdigest()[:6]
-                        add(f"collect:{effect}", "trigger",
-                            f"Pick up the item {bearing(start, after.x, after.y)}", step, short="Pick up the item")
-                        continue
-                    key = (after.x // grid, after.y // grid)
+                    changed = base_progress
+                    if changed != before_step:
+                        # The save data changed on this step. If standing still does the same,
+                        # the room did it by itself (a flag set a moment after entering): take
+                        # that as the new baseline. Otherwise Link picked something up here.
+                        moved_here = self._capture()
+                        self._load(state)
+                        run_route(self.shadow, (("wait", stride),))
+                        drifted = progress(self.shadow)
+                        self._load(moved_here)
+                        if drifted == before_step:
+                            effect = hashlib.sha1(changed).hexdigest()[:6]
+                            add(f"collect:{effect}", "trigger", f"Pick up the item {bearing(start, after.x, after.y)}",
+                                step, short="Pick up the item")
+                            continue
+                    # A step cut short ends against something, often a doorway. Keep that
+                    # exact spot even when its grid cell was seen, so the search can go on from it.
+                    short = abs(after.x - before.x) + abs(after.y - before.y) < stride - 2
+                    key = ("edge", after.x // 2, after.y // 2) if short else (after.x // grid, after.y // grid)
                     if key not in seen:
                         seen.add(key)
                         queue.append((self._capture(), step))

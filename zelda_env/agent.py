@@ -618,7 +618,9 @@ class Agent:
         self.empty = 0
         if origin == "fallback":
             self.idle += 1
-            if self.idle > self.patience:
+            # Dungeon rooms reset and have to be redone, so the rotation needs more room there.
+            inside = getattr(self, "focus", None) is not None and self.pyboy.memory[DUNGEON_INDEX] == self.focus
+            if self.idle > self.patience * (6 if inside else 1):
                 self.write({"event": "impasse", "room": obs.room, "xy": [obs.x, obs.y], "objective": name})
                 return False
         self.decisions += 1
