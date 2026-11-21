@@ -180,7 +180,43 @@ Esta sessão não serve como medida de custo nem como prova de ausência de cicl
 | "Sem opções" em `04:09` com empurradas disponíveis | Cache de área examinada pulava a camada do levantamento que encontra empurrões. | Cada cache vale só para a própria camada e é descartado ao carregar a sessão. |
 | Saída para a Maku Tree nunca tomada | Regra que proibia sair da dungeon do objetivo. | A regra barra só saídas para salas já visitadas. |
 
-Uma execução do boot com o código final, sem correções no meio, é necessária para medir decisões por objetivo e contar ciclos. Ela está descrita na seção seguinte quando disponível.
+Uma execução do boot com o código final, sem correções no meio, é necessária para medir decisões por objetivo e contar ciclos. A seção seguinte descreve essas execuções.
+
+## Quarta rodada: execuções limpas desde o boot
+
+Cada execução parte de `output/inicio.state`, com memória vazia (`--fresh`), sem janela e sem supervisor. Nenhum código muda durante a execução. Quando uma execução para ou corta um ciclo, a causa é corrigida e a execução seguinte recomeça do boot.
+
+Comando:
+
+```
+python -m zelda_env.agent --headless --fresh --decisions 900 --directory output/agent-limpa
+```
+
+A métrica de ciclo é o maior trecho de decisões seguidas formado por no máximo quatro movimentos distintos, além dos eventos `loop_cut` e `impasse` do rastro.
+
+| Execução | Resultado | Causa | Correção |
+| --- | --- | --- | --- |
+| 1 | Impasse na decisão 143, na floresta. | Duas passagens para a mesma sala vizinha contavam como uma saída. | A saída de borda leva no nome o trecho onde Link pousa do outro lado. |
+| 2 | 2 objetivos. Cerca de 200 idas e voltas entre `00:39` e `00:49`, 42 cortes de ciclo. | A rota conhecida levava à parte da sala do marco que não tem o evento. | Uma entrada ainda não usada para a sala do marco vem antes da rota conhecida. A parte da sala onde nada resta deixa de ser destino. |
+| 3 | 21 conversas seguidas com o mesmo personagem, 3 cortes em 40 decisões. | Refazer a tarefa do marco reoferecia a mesma conversa sem limite. | Três repetições por ação ao refazer a tarefa. |
+| 4 | 1 objetivo. Impasse na decisão 290. | Dez cortes de arbusto ao acaso esgotaram o limite de uso do item sem abrir o caminho. | A opção de obstáculo diz o lado da sala em que ele fica quando nenhuma saída aponta para o objetivo. |
+| 5 | 3 objetivos em 41 decisões. Impasse na decisão 124. | Depois de ir a uma área pendente, Laya voltava pela saída conhecida. O corte de ciclo apagava todas as pendências. | Após a ida a uma área pendente, só o que falta nela é oferecido. O corte remove só os movimentos do ciclo. |
+| 6 | 5 objetivos em 268 decisões. 2 cortes de ciclo na sala `01:48`. | A opção genérica de cavar era reoferecida a cada decisão. | O limite de três repetições vale para qualquer ação. |
+| 7 | 5 objetivos em 265 decisões, sem corte de ciclo e sem impasse até ali. Primeiro corte na decisão 377, no sexto objetivo. | O marco do sexto objetivo apontava para a sala errada. A etapa avançava ao entrar de novo na dungeon já percorrida. A lista de doze opções cortava a que o objetivo pedia. | Marco corrigido para a sala do portal. A etapa só avança em mapa novo ou no mapa da etapa seguinte. As opções que o objetivo pede ficam na lista. |
+
+Decisões por objetivo na execução 7:
+
+| Objetivo | Decisão |
+| --- | --- |
+| `espada` | 28 |
+| `maku-tree` | 39 |
+| `passado` | 41 |
+| `pa` | 120 |
+| `maku-tree-salva` | 265 |
+
+Até a decisão 265 da execução 7, o maior trecho com no máximo quatro movimentos distintos tem 13 decisões. A origem das 379 decisões da execução: 209 do Laya, 75 forçadas (uma só opção nova), 54 de fronteira, 15 de rota, 12 de varredura, 10 de receita e 4 de rodízio. O levantamento levou em média 15 s por decisão.
+
+O sexto objetivo (`chave-do-cemiterio`) ainda não foi concluído em execução limpa.
 
 ## Estado em relação à spec
 
