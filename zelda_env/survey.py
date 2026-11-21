@@ -490,8 +490,14 @@ class Surveyor:
                         text = f"Talk to the character {where}, who reacts"
                     else:
                         text = f"Use the item on the obstacle {where}"
+                    # Obstacles look alike. The side of the room tells them apart, so a goal
+                    # that names a direction can pick the one that is in the way.
+                    wide, tall = (240, 176) if self.shadow.memory[0xCD01] != 1 else (160, 128)
+                    dx, dy = (tx - wide / 2) / wide, (ty - tall / 2) / tall
+                    side = (("west" if dx < 0 else "east") if abs(dx) >= abs(dy)
+                            else ("north" if dy < 0 else "south"))
                     brief = ("Talk to the character" if entity else "Read the sign" if opened
-                             else "Use the item on the obstacle")
+                             else f"Use the item on the obstacle to the {side}")
                     full = (*menu, *step, *probe)
 # A talk is the same whatever Link holds. An item effect is named by the item.
                     name = f"interact:{target}:{'talk' if opened else f'{item:02x}'}:{result}"

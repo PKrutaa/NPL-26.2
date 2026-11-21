@@ -481,8 +481,13 @@ class Agent:
                 if door:
                     return door, "route", {}
 
+        open_way = False
+
         def brief(option):
             text = option.short or option.description
+            if open_way and " obstacle to the " in text:
+                # With an open exit toward the goal, the side an obstacle is on is noise.
+                text = text.split(" to the ")[0]
             # An exit to a room not seen in this story state says so: goals can ask for it.
             fresh_room = option.kind == "exit" and option.destination not in seen
             return f"{text} to a new room" if fresh_room and text.startswith("Go ") else text
@@ -547,6 +552,8 @@ class Agent:
                     done[room] = done.get(room, 0) + 1
                     fresh = [*fresh, *again]
         impasse = not fresh
+        open_way = hint.startswith("Go ") and any(
+            option.kind == "exit" and toward(option, hint[:-1]) for option in fresh)
         if impasse and getattr(self, "landmark", None) == obs.room and room not in spent:
             spent.append(room)
 

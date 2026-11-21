@@ -285,3 +285,19 @@ def test_a_part_of_the_landmark_with_nothing_left_is_not_a_destination_again():
     made.memory.edges[here] = {"exit:T/1": node}
     _, origin, _ = made.decide(OBS, here, back, "Go north.")
     assert origin != "route"
+
+
+def test_the_side_of_an_obstacle_is_told_only_when_no_exit_points_at_the_goal():
+    made = agent()
+    bush = Option("cut:1", "interact", "x", (), None, "Use the item on the obstacle to the west")
+    options = [bush, Option("talk:1", "interact", "x", (), None, "Read the sign")]
+    node = node_of("A", options)
+    made.memory.arrive(node, options)
+    made.decide(OBS, node, options, "Go west.")
+    assert "Use the item on the obstacle to the west" in made.policy.asked[0].values()
+    made = agent()
+    options = [bush, Option("exit:B", "exit", "x", (), "B", "Go west")]
+    node = node_of("A", options)
+    made.memory.arrive(node, options)
+    made.decide(OBS, node, options, "Go west.")
+    assert "Use the item on the obstacle" in made.policy.asked[0].values()
