@@ -273,6 +273,8 @@ class Memory:
             raise ValueError(f"Formato de memória incompatível: {data.get('format')}")
         memory = cls()
         memory.epochs, memory.edges = data["epochs"], data["edges"]
+        for epoch in memory.epochs.values():
+            epoch["depth"] = {}  # only a cache of how closely each area was examined
         memory.banned = {tuple(item) for item in data["banned"]}
         memory.epoch = data["epoch"]
         memory.landmarks = data.get("landmarks", {})
