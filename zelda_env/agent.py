@@ -531,7 +531,9 @@ class Agent:
                 offered = [way for way in wanted if any(toward(option, f"Go {way}") for option in [*fresh, *ways])]
                 hint = f"Go {offered[0]}." if offered else "Go to a new room."
             goal = hint[:-1]
-            if not any(toward(option, goal) for option in fresh):
+            # After a trip to an area because something there is untried, only the untried
+            # is offered: going back the known way would undo the trip.
+            if not any(toward(option, goal) for option in fresh) and not (self.hops and fresh):
                 fresh = [*fresh, *(option for option in ways if toward(option, goal))]
             if hint == "Go outside." and not any(toward(option, goal) for option in fresh):
                 # The door is some rooms away. Follow the known map to it.
@@ -739,7 +741,9 @@ class Agent:
             if often or (len(window) == LOOP_WINDOW and len(set(window)) <= LOOP_MOVES and origin != "fallback"):
                 stale = self.memory.current.setdefault("stale", [])
                 stale.extend(f"{place}|{name}" for place, name in set(window) if f"{place}|{name}" not in stale)
-                self.memory.current["pending"].clear()
+                pending = self.memory.current["pending"]
+                for place in pending:
+                    pending[place] = [item for item in pending[place] if f"{place}|{item}" not in stale]
                 self.trail.clear()
                 self.loops += 1
                 self.write({"event": "loop_cut", "room": obs.room, "moves": sorted(name for _, name in set(window))})
