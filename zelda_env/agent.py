@@ -408,6 +408,9 @@ class Agent:
             if where and room and room[:2] not in OVERWORLD and self.pyboy.memory[DUNGEON_INDEX] != where[0]:
                 elsewhere = "Go outside."
             state = self.memory.landmarks.setdefault(name, {"step": 0, "arrived": False})
+            # Kept per objective step, not per story state: progress elsewhere (a gate
+            # unlocked) does not put the task back in a part where nothing was left.
+            self.spent = state.setdefault("spent", [])
             while room and state["step"] < len(steps):
                 target, task = steps[state["step"]]
                 last = state["step"] == len(steps) - 1
@@ -420,7 +423,8 @@ class Agent:
                     if talked and not last:
                         # The talk, or the item on the obstacle, moved the story on. Nothing
                         # else is asked of this room.
-                        state.update(step=state["step"] + 1, arrived=False, epoch=None)
+                        state.update(step=state["step"] + 1, arrived=False, epoch=None, spent=[])
+                        self.spent = state["spent"]
                         continue
                     if not state["arrived"]:
                         state["epoch"] = self.memory.epoch
@@ -432,7 +436,8 @@ class Agent:
                         onward or room not in self.memory.dungeons):
                     # The task here was to go through something, and Link did: he is on the
                     # map of the next step, or somewhere he has never been.
-                    state.update(step=state["step"] + 1, arrived=False, epoch=None)
+                    state.update(step=state["step"] + 1, arrived=False, epoch=None, spent=[])
+                    self.spent = state["spent"]
                     continue
                 where = heading(room, target)
                 self.target = target if where else None
@@ -538,7 +543,9 @@ class Agent:
         reused = self.memory.current.setdefault("reused", {})
         # A landmark room can have parts that do not connect. A part where nothing is left
         # to do is spent: the task is in another part, reached some other way.
-        spent = self.memory.current.setdefault("spent", [])
+        spent = getattr(self, "spent", None)
+        if spent is None:
+            spent = self.memory.current.setdefault("spent", [])
         known = self.memory.edges.get(room, {})
         ways = [option for option in usable if option.kind == "exit" and option not in fresh
                 and reused.get(f"{room}|{option.id}", 0) < GOAL_REUSES and known.get(option.id) not in spent]

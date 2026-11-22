@@ -384,3 +384,16 @@ def test_a_way_the_last_action_opened_is_taken_before_the_known_route():
     made.memory.arrive(node, [key, south, gate])
     option_, origin, _ = made.decide(OBS, node, [key, south, gate], "Go south.")
     assert option_ is gate and origin == "route"
+
+
+def test_a_spent_part_of_the_landmark_stays_spent_when_the_story_moves_on(monkeypatch):
+    import zelda_env.agent as module
+
+    steps = (("00:8d", "Enter the door or stairs."),)
+    monkeypatch.setattr(module, "OBJECTIVES", (("dungeon", steps, "Go to a new room.", lambda pyboy: False),))
+    made = agent()
+    made.objective("00:8d")
+    made.spent.append("00:8d@0")
+    made.memory.enter(b"gate unlocked")
+    made.objective("00:5c")
+    assert made.spent == ["00:8d@0"]
