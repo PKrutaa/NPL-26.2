@@ -10,7 +10,8 @@ shorter test start from a saved game state plus the agent memory saved with it:
   python -m zelda_env.segments list
   python -m zelda_env.segments capture output/agent-limpa
   python -m zelda_env.segments run chave-do-cemiterio --decisions 150
-  python -m zelda_env.segments run all --jobs 4
+  python -m zelda_env.segments run all --jobs 5
+  python -m zelda_env.segments run pa maku-tree-salva --jobs 2
   python -m zelda_env.segments case-add pergunta-maku --state output/agent/falha-260.state \\
       --until-room 00:48 --decisions 30
   python -m zelda_env.segments case-run all --jobs 4
@@ -22,6 +23,7 @@ budget with no loop cut and no impasse. The exit code is 1 when any test does no
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -130,8 +132,11 @@ def play(label, session, args, *, state=None, memory=None, until=None, until_roo
     if session.exists():
         shutil.rmtree(session)  # failure snapshots of an older run must not be mistaken for new ones
     session.mkdir(parents=True)
+    # One emulator uses one core. Keeping the model to one thread too lets several tests
+    # run side by side without fighting for the same cores.
+    environment = {**os.environ, "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1", "VECLIB_MAXIMUM_THREADS": "1"}
     with (session / "agent.log").open("w", encoding="utf-8") as log:
-        code = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT).returncode
+        code = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, env=environment).returncode
     trace = session / "trace.jsonl"
     if code or not trace.is_file():
         return {"test": label, "status": "erro", "log": str(session / "agent.log")}
@@ -219,7 +224,8 @@ def main():
     taking.add_argument("session", type=Path)
     taking.add_argument("--update", action="store_true", help="Substitui checkpoints existentes")
     running = commands.add_parser("run", help="Roda um trecho, ou todos com 'all'")
-    running.add_argument("segment", choices=[*names(), "all"])
+    running.add_argument("segment", nargs="+", choices=[*names(), "all"],
+                         help="Um ou mais trechos, ou 'all'")
     running.add_argument("--decisions", type=int, default=200, help="Orçamento de decisões por trecho")
     running.add_argument("--fresh-memory", action="store_true", help="Começa o trecho com a memória vazia")
     running.add_argument("--update", action="store_true",
@@ -273,13 +279,13 @@ def main():
         jobs = [lambda name=name, case=case: run_case(directory, name, case, args) for name, case in chosen.items()]
         chained = False
     else:
-        chosen = order if args.segment == "all" else [args.segment]
+        chosen = order if "all" in args.segment else [name for name in order if name in args.segment]
         if args.jobs > 1:
             # In parallel each segment starts from its stored checkpoint, so only those that have one run.
             chosen = [name for name in chosen
                       if not order.index(name) or checkpoint(directory, order[order.index(name) - 1])[0].is_file()]
         jobs = [lambda name=name: run_segment(directory, name, args) for name in chosen]
-        chained = args.segment == "all" and args.jobs == 1
+        chained = "all" in args.segment and args.jobs == 1
     failed = False
     directory.mkdir(parents=True, exist_ok=True)
 
