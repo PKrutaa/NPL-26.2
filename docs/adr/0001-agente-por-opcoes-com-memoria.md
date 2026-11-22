@@ -87,11 +87,30 @@ Um objetivo pode nomear a dungeon em que acontece. Enquanto Link está nela, sai
 
 Quando a sala de referência do objetivo já foi visitada, o agente segue o mapa que construiu até ela, em vez da direção.
 
+### Sala de referência com partes sem ligação
+
+A sala de referência de uma etapa pode ter partes que não se ligam, e a tarefa fica em uma só delas. Quatro regras tratam isso:
+
+- **Entrada nova primeiro.** Uma saída ainda não usada que leva à sala de referência vem antes de qualquer caminho conhecido.
+- **Parte esgotada.** Quando não sobra nada a fazer na parte em que Link está, ela é marcada como esgotada. Os caminhos conhecidos deixam de mirar essa parte.
+- **Refazer a tarefa tem limite.** Na sala de referência, o que combina com a tarefa pode ser refeito, até três vezes por ação.
+- **Avanço de etapa.** A etapa só avança quando Link sai da sala de referência para um mapa nunca visto ou para o mapa da etapa seguinte.
+
+### Abertura de caminho
+
+Quando uma ação faz surgir uma saída, o agente guarda a ação como o que abre aquela saída e a refaz quando a saída está fechada. Só conta como abertura a saída que surge com mudança de terreno ou depois de uma conversa. Uma saída que apareceu porque o levantamento seguinte foi mais detalhado não é atribuída à ação.
+
+### Perguntas no diálogo
+
+O agente avança cenas e diálogos sozinho até Link voltar a ser controlável. Quando o jogo faz uma pergunta com opções, ele confirma a primeira. Se a mesma pergunta volta na mesma cena, confirma a seguinte, em rodízio. Isso resolve perguntas como "devo repetir?", em que a primeira resposta reinicia a explicação.
+
 ### 3. O Laya escolhe, com a origem registrada
 
 Com duas ou mais candidatas, o Laya recebe só um objetivo curto e até doze opções curtas. Exemplo: objetivo `Go north.` e opções `Go north to a new room`, `Talk to the character`, `Attack the enemy`.
 
 O texto curto foi uma decisão medida. Em 23 decisões reais com uma saída na direção do objetivo, o Laya escolheu essa saída em 9 com o contexto longo (objetivo em frase, sala, posição, histórico) e em 23 com o contexto curto, com confiança média de 0,87. O acaso daria 6,5.
+
+Com mais de doze candidatas, as que combinam com o objetivo ficam na lista e as mais distantes saem. Uma opção de obstáculo diz o lado da sala em que ele está (`Use the item on the obstacle to the east`), exceto quando há uma saída livre na direção do objetivo.
 
 Cada objetivo é uma lista de etapas escrita à mão, com uma sala de referência e o que fazer ao chegar, mais um teste lido da memória do jogo que o encerra. Enquanto Link está no mesmo mapa da sala de referência, o objetivo é a direção até ela, com uma direção só: a de maior distância que tenha saída disponível. Em outro mapa, como um interior, o objetivo é um texto fixo, por exemplo `Go to a new room.`. As salas e flags vêm do disassembly. Não há rota nem coordenada.
 
@@ -111,6 +130,8 @@ Cada decisão registra a origem no `trace.jsonl`:
 ### 4. Ciclos são cortados e o impasse termina a execução
 
 As regras acima reduzem a repetição, mas a garantia final é um detector que não depende delas. Doze decisões seguidas feitas de no máximo quatro movimentos distintos, ou um mesmo movimento feito seis vezes em oitenta decisões, contam como ciclo. Os movimentos do ciclo deixam de ser oferecidos como novos, as pendências são descartadas e a decisão é refeita. O evento fica no trace como `loop_cut`.
+
+O corte remove das pendências só os movimentos do ciclo. As outras pendências continuam valendo.
 
 Sem nada pendente, o agente varre as salas conhecidas, da vista há mais tempo para a mais recente. Depois de 80 decisões de varredura sem progresso na história, ou de um rodízio local sem novidade, registra `impasse` e para. O último estado fica salvo.
 
