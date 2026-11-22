@@ -335,6 +335,18 @@ def test_a_talk_that_moves_the_story_ends_the_step_at_that_landmark(monkeypatch)
     assert made.objective("00:38") == ("chave", "Go south or east.")
 
 
+def test_an_obstacle_removed_with_an_item_ends_the_step_at_that_landmark(monkeypatch):
+    import zelda_env.agent as module
+
+    steps = (("00:6a", "Use the item on the obstacle to the east."), ("00:7c", "Enter the door or stairs."))
+    monkeypatch.setattr(module, "OBJECTIVES", (("chave", steps, "Go to a new room.", lambda pyboy: False),))
+    made = agent()
+    assert made.objective("00:6a") == ("chave", "Use the item on the obstacle to the east.")
+    made.memory.enter(b"sapling burned")
+    assert made.objective("00:6a") == ("chave", "Go south or east.")
+    assert made.objective("00:6b") == ("chave", "Go south or east.")
+
+
 def test_redoing_what_opened_a_way_is_bounded_per_story_state():
     memory = Memory()
     cut, west = option("interact:2:6:05:eventc53a"), option("exit:00:79/5", "exit", "00:79")

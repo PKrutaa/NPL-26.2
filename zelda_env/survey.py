@@ -511,7 +511,9 @@ class Surveyor:
                     full = (*menu, *step, *probe)
 # A talk is the same whatever Link holds. An item effect is named by the item.
                     name = f"interact:{target}:{'talk' if opened else f'{item:02x}'}:{result}"
-                    if name in found or not confirmed(kit, full):
+                    if name in found:
+                        break  # this obstacle already has its option: no second one with another item
+                    if not confirmed(kit, full):
                         continue
                     add(name, "interact", text, full, short=brief)
                     break

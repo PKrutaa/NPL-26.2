@@ -414,9 +414,11 @@ class Agent:
                     if task is None and not last:
                         state["step"] += 1  # a waypoint: nothing to do here
                         continue
-                    talked = task and task.startswith("Talk") and state.get("epoch") not in (None, self.memory.epoch)
+                    talked = (task and task.startswith(("Talk", "Use the item on the obstacle"))
+                              and state.get("epoch") not in (None, self.memory.epoch))
                     if talked and not last:
-                        # The talk moved the story on. Nothing else is asked of this room.
+                        # The talk, or the item on the obstacle, moved the story on. Nothing
+                        # else is asked of this room.
                         state.update(step=state["step"] + 1, arrived=False, epoch=None)
                         continue
                     if not state["arrived"]:
