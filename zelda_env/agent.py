@@ -552,7 +552,10 @@ class Agent:
         # A way that the last action opened is taken before any known path: a gate that
         # was just unlocked is the way forward, even when the map knows another one.
         opened = getattr(self, "just_opened", ())
-        gate = next((option for option in fresh if option.kind == "exit" and option.id in opened), None)
+        # Only toward a room Link has never been in: a second gap to the room he came from
+        # also shows up when an object is pushed out of the way.
+        gate = next((option for option in fresh if option.kind == "exit" and option.id in opened
+                     and option.destination not in self.memory.dungeons), None)
         if gate:
             return gate, "route", {}
         target = getattr(self, "target", None)
@@ -659,9 +662,12 @@ class Agent:
                     return step, "recipe", {}
             # Nothing is known to be pending. Sweep: head for the known room Link has not
             # seen for the longest time, where a new look may find what changed.
+            # The room Link just came from goes last: two rooms that are each the oldest
+            # seen from the other would otherwise be walked back and forth.
+            came_from = getattr(self, "entered_from", None)
             stale_rooms = sorted((place for place in self.memory.dungeons
                                   if place != obs.room and worth_a_trip(place)),
-                                 key=lambda place: self.memory.last_seen.get(place, -1))
+                                 key=lambda place: (place == came_from, self.memory.last_seen.get(place, -1)))
             for place in stale_rooms[:3]:
                 first = self.memory.room_hop(obs.room, lambda name: name == place)
                 step = first and (next((option for option in usable if option.id == first), None)

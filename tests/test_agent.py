@@ -397,3 +397,33 @@ def test_a_spent_part_of_the_landmark_stays_spent_when_the_story_moves_on(monkey
     made.memory.enter(b"gate unlocked")
     made.objective("00:5c")
     assert made.spent == ["00:8d@0"]
+
+
+def test_a_second_gap_to_a_room_already_seen_is_not_taken_as_a_gate():
+    made = agent()
+    push, back = option("push:slot4@10:6:2:up", "push"), Option("exit:B/10", "exit", "south", (), "B", "Go south")
+    other = Option("exit:B/0", "exit", "south", (), "B", "Go south")
+    node = node_of("A", [back])
+    made.memory.dungeons = {"A": 0, "B": 0}
+    made.memory.arrive(node, [push, back])
+    made.last = (node, "push:slot4@10:7:1:up", {back.id}, b"cube in the corridor")
+    made.note_opening(node, {back.id, other.id}, b"cube moved")
+    made.memory.arrive(node, [push, back, other])
+    chosen, origin, _ = made.decide(OBS, node, [push, back, other], "Go to a new room.")
+    assert origin != "route"
+
+
+def test_the_sweep_does_not_go_straight_back_to_the_room_link_came_from():
+    made = agent()
+    here = [option("exit:B", "exit", "B"), option("exit:C", "exit", "C")]
+    node = node_of("A", here)
+    made.memory.arrive(node, here)
+    for name in ("exit:B", "exit:C"):
+        made.memory.record(node, name)
+    made.memory.edges[node] = {"exit:B": "B@0", "exit:C": "C@0"}
+    made.memory.last_seen = {"A": 50, "B": 10, "C": 40}
+    made.memory.dungeons = {"A": 0xFF, "B": 0xFF, "C": 0xFF}
+    made.pyboy.memory[0xCC39] = 0xFF
+    made.entered_from = "B"  # the oldest seen, but Link has just come from it
+    obs = SimpleNamespace(room="A", x=10, y=20, facing="up")
+    assert made.decide(obs, node, here, "Go to a new room.")[:2] == (here[1], "sweep")
