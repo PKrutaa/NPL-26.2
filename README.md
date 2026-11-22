@@ -95,6 +95,8 @@ O mesmo código Python roda em Windows e Linux. Os comandos abaixo seguem a [spe
 | Verificar | `.\.venv\Scripts\python.exe -m zelda_env smoke --rom "C:\Games\Ages US.gbc"` | `.venv/bin/python -m zelda_env smoke --rom "/home/me/Games/Ages US.gbc"` |
 | Jogar | `Jogar.cmd` | `./jogar.sh` |
 
+O passo a passo completo para Windows, incluindo o agente e os testes por trecho, está em [Rodar no Windows](docs/windows.md).
+
 No Linux, o build da ROM usa `git`, `cmake`, `gcc`, `make` e `bash`. No Windows, o script de build ainda não roda: passe uma ROM compatível com `--rom`, ou gere a ROM em Linux, macOS ou WSL2 e copie o arquivo.
 
 Sem dados no checkout, o projeto grava em pastas do usuário:
@@ -235,6 +237,18 @@ Os objetivos em `zelda_env/agent.py` são etapas escritas à mão: uma sala de r
 
 Cada decisão registra também a vida de Link. O levantamento descarta rotas que causam dano, e uma decisão que mata Link é desfeita e nunca mais oferecida naquele ponto.
 
+### Testes por trecho
+
+Para iterar em um trecho do jogo sem rodar desde o boot, o agente salva estado e memória a cada objetivo concluído, e `zelda_env.segments` roda de um desses pontos até o objetivo seguinte:
+
+```bash
+.venv/bin/python -m zelda_env.segments list
+.venv/bin/python -m zelda_env.segments capture output/agent
+.venv/bin/python -m zelda_env.segments run chave-do-cemiterio --decisions 150
+```
+
+Um trecho passa quando o objetivo é concluído sem corte de ciclo e sem impasse. Veja os [detalhes](docs/validation-agent.md#testes-por-trecho).
+
 ### Supervisor opcional
 
 O supervisor é um LLM pequeno que roda no [Ollama](https://ollama.com) local. Ele é consultado quando o agente fica sem opção nova, ou depois de 20 decisões sem progresso na história. Ele recebe o objetivo, a sala, as últimas ações e a lista de opções, e devolve o id de uma opção ou `abstain`. O código rejeita JSON inválido, id fora da lista e resposta depois de 20 segundos. Nesses casos o agente segue com a recuperação própria. O limite é de duas consultas por impasse, com seis decisões de intervalo.
@@ -300,7 +314,7 @@ A janela de jogo usa o teclado do PyBoy e avança um frame por `tick()`. O smoke
 
 ## Próximo passo
 
-O agente chegou ao passado e à região da Black Tower sem rotas escritas à mão. Para a primeira dungeon faltam combate, leitura de HP e inventário, e uso de itens em terreno livre, como a pá. O supervisor precisa de uma avaliação em sessão completa com o prompt novo.
+O agente conclui sozinho, desde o boot, os cinco primeiros objetivos: espada, Árvore Maku, viagem ao passado, pá e salvar a Árvore Maku. O sexto, a chave do cemitério, ainda não foi concluído em execução limpa. Para a primeira dungeon faltam chefes, projéteis e recuperação de corações. A validação em máquinas Windows e Linux reais também está pendente.
 
 O [ADR 0001](docs/adr/0001-agente-por-opcoes-com-memoria.md) explica como o agente funciona e o que ele não cobre. A [validação do agente](docs/validation-agent.md) traz os números e o estado de cada item da spec. A [proposta de arquitetura](docs/architecture-brainstorm.md) registra o desenho original. A [pesquisa sobre Oracle of Ages](docs/research-oracle-of-ages.md) reúne as referências para a leitura de memória.
 
