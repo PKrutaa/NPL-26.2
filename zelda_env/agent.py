@@ -542,6 +542,12 @@ class Agent:
         known = self.memory.edges.get(room, {})
         ways = [option for option in usable if option.kind == "exit" and option not in fresh
                 and reused.get(f"{room}|{option.id}", 0) < GOAL_REUSES and known.get(option.id) not in spent]
+        # A way that the last action opened is taken before any known path: a gate that
+        # was just unlocked is the way forward, even when the map knows another one.
+        opened = getattr(self, "just_opened", ())
+        gate = next((option for option in fresh if option.kind == "exit" and option.id in opened), None)
+        if gate:
+            return gate, "route", {}
         target = getattr(self, "target", None)
         if target:
             # A way into the landmark that was never taken comes before any known path.
@@ -696,9 +702,11 @@ class Agent:
         An exit that a closer look found is not an exit that the action opened. Opening
         one changes the terrain, or comes from a talk.
         """
+        self.just_opened = set()
         if self.last and self.last[0] == node and exits_now - self.last[2] and (
                 terrain != self.last[3] or self.last[1].startswith("interact:slot")):
             self.memory.unlocked(node, self.last[1], exits_now - self.last[2])
+            self.just_opened = exits_now - self.last[2]
 
     def step(self):
         """One decision. Returns False when there is nothing left to try."""

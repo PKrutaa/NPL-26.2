@@ -371,3 +371,16 @@ def test_the_goal_direction_with_an_untaken_exit_comes_before_the_known_way():
     made.memory.record(node, east.id)
     option, _, _ = made.decide(OBS, node, [south, east], "Go south or east.")
     assert option is south  # nothing new: the known way toward the goal is offered again
+
+
+def test_a_way_the_last_action_opened_is_taken_before_the_known_route():
+    made = agent()
+    key, south = option("interact:4:4:15:event893a"), Option("exit:C", "exit", "south", (), "C", "Go south")
+    gate = Option("exit:D", "exit", "east", (), "D", "Go east")
+    node = node_of("A", [south])
+    made.memory.arrive(node, [key, south])
+    made.last = (node, key.id, {south.id}, b"gate closed")
+    made.note_opening(node, {south.id, gate.id}, b"gate open")
+    made.memory.arrive(node, [key, south, gate])
+    option_, origin, _ = made.decide(OBS, node, [key, south, gate], "Go south.")
+    assert option_ is gate and origin == "route"
