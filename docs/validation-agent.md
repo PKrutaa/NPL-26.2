@@ -218,7 +218,26 @@ Decisões por objetivo na execução 7:
 
 Até a decisão 265 da execução 7, o maior trecho com no máximo quatro movimentos distintos tem 13 decisões. A origem das 379 decisões da execução: 209 do Laya, 75 forçadas (uma só opção nova), 54 de fronteira, 15 de rota, 12 de varredura, 10 de receita e 4 de rodízio. O levantamento levou em média 15 s por decisão.
 
-O sexto objetivo (`chave-do-cemiterio`) ainda não foi concluído em execução limpa.
+O sexto objetivo ainda não foi concluído em execução limpa desde o boot. Ele foi concluído no teste por trecho, descrito abaixo.
+
+### Sexto e sétimo objetivos no teste por trecho
+
+Os trechos partem do ponto salvo pela execução 9 ao salvar a Árvore Maku, com a memória do agente daquele momento.
+
+| Trecho | Resultado | Decisões | Cortes de ciclo | Impasses | Maior trecho repetitivo |
+| --- | --- | --- | --- | --- | --- |
+| `sacola-de-sementes` | Passou | 6 | 0 | 0 | 4 |
+| `chave-do-cemiterio` | Passou | 64 | 0 | 0 | 6 |
+
+O que impedia o trecho da chave, na ordem em que apareceu:
+
+| Causa | Correção |
+| --- | --- |
+| A Árvore Maku solta a Sacola de Sementes depois da conversa, e a Laya ia embora sem pegar. | Novo objetivo `sacola-de-sementes`. |
+| O caminho para o cemitério é fechado por um broto que só queima com semente de brasa. O levantamento esperava 20 quadros pelo efeito do item, e a semente leva cerca de um segundo. | O teste de obstáculo espera mais quando o item não mostra efeito na hora, e um bloco sólido deixa de ser tratado como chão livre. |
+| Depois de queimar o broto, a etapa não avançava e o agente voltava para `00:6a`. | Uma etapa de conversa ou de obstáculo avança quando a história anda. |
+| A sala de referência da chave era `00:7c`. A caverna fica em `00:8d`. | Sala de referência corrigida a partir dos dados de warp do disassembly. |
+| Um arbusto que volta a crescer era cortado a cada visita para reabrir um caminho que ninguém ia usar. | Limite de duas repetições por estado da história. |
 
 ## Testes por trecho e por caso
 
