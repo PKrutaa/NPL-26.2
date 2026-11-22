@@ -40,6 +40,7 @@ LONG_WINDOW, LONG_REPEATS = 80, 6  # one move made this many times within that m
 LOOP_WINDOW, LOOP_MOVES = 12, 4  # that many decisions made of at most this many distinct moves
 RECIPE_STEPS = 12
 SWEEP_LIMIT = 80  # sweep decisions without story progress before declaring an impasse
+FAILURE_LOOKBACK = 6  # snapshots kept, one every five decisions
 MAX_HOPS = 14  # consecutive trips to a pending area with nothing new found
 SURVEY_LEVELS = (
     {"grid": 16, "stride": 16, "limit": 400, "pushes": False},
@@ -405,6 +406,13 @@ class Agent:
                     if task is None and not last:
                         state["step"] += 1  # a waypoint: nothing to do here
                         continue
+                    talked = task and task.startswith("Talk") and state.get("epoch") not in (None, self.memory.epoch)
+                    if talked and not last:
+                        # The talk moved the story on. Nothing else is asked of this room.
+                        state.update(step=state["step"] + 1, arrived=False, epoch=None)
+                        continue
+                    if not state["arrived"]:
+                        state["epoch"] = self.memory.epoch
                     state["arrived"] = True
                     self.landmark = target
                     return name, task or elsewhere
@@ -413,7 +421,7 @@ class Agent:
                         onward or room not in self.memory.dungeons):
                     # The task here was to go through something, and Link did: he is on the
                     # map of the next step, or somewhere he has never been.
-                    state.update(step=state["step"] + 1, arrived=False)
+                    state.update(step=state["step"] + 1, arrived=False, epoch=None)
                     continue
                 where = heading(room, target)
                 self.target = target if where else None
@@ -910,6 +918,7 @@ def main():
                         help="Memória do agente que acompanha --seed-state. Padrão: memória vazia")
     parser.add_argument("--until", metavar="OBJETIVO", choices=[item[0] for item in OBJECTIVES],
                         help="Para assim que este objetivo é concluído")
+    parser.add_argument("--until-room", metavar="SALA", help="Para assim que Link chega a esta sala, como 00:38")
     args = resolve_common(parser, parser.parse_args())
     seed = args.seed_state or paths.output_path("inicio.state")
     directory = args.directory or paths.output_path("agent")
@@ -970,11 +979,36 @@ def main():
                 budget = agent.decisions + args.decisions
                 reason = "orçamento de decisões"
                 started = time.perf_counter()
+                # Snapshots from a few decisions back. When a loop is cut or the agent stops
+                # at an impasse, the oldest one is written out: a short way to reproduce it.
+                history, loops = deque(maxlen=FAILURE_LOOKBACK), 0
+
+                def keep_failure():
+                    if history:
+                        count, state, memory = history[0]
+                        paths.atomic_write(directory / f"falha-{count}.state", state)
+                        paths.atomic_write(directory / f"falha-{count}.memory.json", memory)
+                        print(f"Ponto de reprodução salvo: {directory / f'falha-{count}.state'}", flush=True)
+                        history.clear()
+
                 try:
                     while agent.decisions < budget:
                         reached = len(agent.done)
+                        if agent.decisions % 5 == 0 and (not history or history[-1][0] != agent.decisions):
+                            snapshot = BytesIO()
+                            pyboy.save_state(snapshot)
+                            agent.memory.decisions = agent.decisions
+                            history.append((agent.decisions, snapshot.getvalue(),
+                                            json.dumps(agent.memory.dump()).encode("utf-8")))
                         if not agent.step():
                             reason = "impasse"
+                            keep_failure()
+                            break
+                        if agent.loops > loops:
+                            loops = agent.loops
+                            keep_failure()
+                        if args.until_room and observe(pyboy).room == args.until_room:
+                            reason = "sala alcançada"
                             break
                         if agent.decisions % 5 == 0 or len(agent.done) > reached:
                             save(pyboy, agent, latest, memory_file)

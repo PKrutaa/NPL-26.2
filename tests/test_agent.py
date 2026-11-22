@@ -321,3 +321,15 @@ def test_an_exit_found_by_a_closer_look_is_not_credited_to_the_last_action():
     made.last = ("04:0c@0", "push:7:4:up", set(), b"before")
     made.note_opening("04:0c@0", {"exit:04:0a/7"}, b"after")
     assert made.memory.opened == {"04:0c@0|push:7:4:up": ["exit:04:0a/7"]}
+
+
+def test_a_talk_that_moves_the_story_ends_the_step_at_that_landmark(monkeypatch):
+    import zelda_env.agent as module
+
+    steps = (("00:38", "Talk to the character."), ("00:7c", "Enter the door or stairs."))
+    monkeypatch.setattr(module, "OBJECTIVES", (("chave", steps, "Go to a new room.", lambda pyboy: False),))
+    made = agent()
+    assert made.objective("00:38") == ("chave", "Talk to the character.")
+    assert made.objective("00:38") == ("chave", "Talk to the character.")  # same story state: still to do
+    made.memory.enter(b"after the talk")
+    assert made.objective("00:38") == ("chave", "Go south or east.")

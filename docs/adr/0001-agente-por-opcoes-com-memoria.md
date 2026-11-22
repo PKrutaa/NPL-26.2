@@ -94,7 +94,7 @@ A sala de referência de uma etapa pode ter partes que não se ligam, e a tarefa
 - **Entrada nova primeiro.** Uma saída ainda não usada que leva à sala de referência vem antes de qualquer caminho conhecido.
 - **Parte esgotada.** Quando não sobra nada a fazer na parte em que Link está, ela é marcada como esgotada. Os caminhos conhecidos deixam de mirar essa parte.
 - **Refazer a tarefa tem limite.** Na sala de referência, o que combina com a tarefa pode ser refeito, até três vezes por ação.
-- **Avanço de etapa.** A etapa só avança quando Link sai da sala de referência para um mapa nunca visto ou para o mapa da etapa seguinte.
+- **Avanço de etapa.** A etapa só avança quando Link sai da sala de referência para um mapa nunca visto ou para o mapa da etapa seguinte. Uma etapa de conversa também avança quando a conversa faz a história andar.
 
 ### Abertura de caminho
 

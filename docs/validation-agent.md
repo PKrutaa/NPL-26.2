@@ -219,24 +219,47 @@ Até a decisão 265 da execução 7, o maior trecho com no máximo quatro movime
 
 O sexto objetivo (`chave-do-cemiterio`) ainda não foi concluído em execução limpa.
 
-## Testes por trecho
+## Testes por trecho e por caso
 
-Uma execução desde o boot leva cerca de uma hora até os objetivos mais distantes. Para iterar em um trecho só, o agente salva o estado do jogo e a própria memória a cada objetivo concluído, e `zelda_env/segments.py` roda de um desses pontos até o objetivo seguinte.
+Uma execução desde o boot leva cerca de uma hora até os objetivos mais distantes. Para iterar mais rápido, o agente salva o estado do jogo e a própria memória em dois momentos, e `zelda_env/segments.py` roda a partir desses pontos.
+
+| Teste | Parte de | Vai até | Duração típica |
+| --- | --- | --- | --- |
+| Trecho | Objetivo anterior concluído (`objetivo-<nome>.state`) | Objetivo seguinte | 3 a 30 minutos |
+| Caso | Qualquer ponto salvo, como o `falha-<decisão>.state` | Um objetivo ou uma sala | 1 a 5 minutos |
+
+Quando o agente corta um ciclo ou para em impasse, ele grava `falha-<decisão>.state` e `falha-<decisão>.memory.json` com o estado de até 25 decisões antes. Esse ponto reproduz o problema sem rodar o jogo desde o início.
 
 ```
 python -m zelda_env.segments list
 python -m zelda_env.segments capture output/agent-limpa
 python -m zelda_env.segments run chave-do-cemiterio --decisions 150
-python -m zelda_env.segments run all
+python -m zelda_env.segments run all --jobs 4
+python -m zelda_env.segments case-add ciclo-7a --state output/agent-limpa/falha-340.state --until-room 00:7b --decisions 30 --note "ida e volta em 00:7a"
+python -m zelda_env.segments case-run all --jobs 4
+python -m zelda_env.segments report
 ```
 
-- `list` mostra cada trecho, de onde ele parte e se o ponto de partida existe.
+- `list` mostra cada trecho, de onde ele parte e se o ponto de partida existe, e os casos guardados.
 - `capture` copia para `output/segments` os pontos salvos por uma sessão do agente.
-- `run` roda um trecho e imprime uma linha JSON com decisões, cortes de ciclo, impasses, opções descartadas, maior trecho repetitivo e tempo. O histórico fica em `output/segments/results.jsonl`.
+- `run` roda um trecho. Com `all`, roda todos em sequência, cada um partindo do fim do anterior. Com `--jobs`, roda em paralelo os trechos que já têm ponto de partida.
+- `case-add` guarda um ponto salvo como caso, com o alvo e o orçamento de decisões. `--no-drops` faz o caso falhar também quando uma opção é descartada por morte ou perda de controle.
+- `case-run` roda um caso ou todos.
+- `report` mostra o último resultado de cada teste ao lado do anterior, com o commit.
 
-Um trecho passa quando o objetivo é concluído dentro do orçamento, sem corte de ciclo e sem impasse. O comando sai com código 1 quando algum trecho não passa. Ao concluir um trecho pela primeira vez, o ponto final vira a partida do trecho seguinte. `--update` substitui um ponto existente e `--fresh-memory` começa o trecho com a memória vazia.
+Cada execução imprime uma linha JSON com decisões, cortes de ciclo, impasses, opções descartadas, maior trecho repetitivo e tempo. O histórico fica em `output/segments/results.jsonl`.
 
-O teste por trecho serve para iterar. A evidência de que não há ciclos continua sendo a execução limpa desde o boot.
+Um teste passa quando chega ao alvo dentro do orçamento, sem corte de ciclo e sem impasse. O comando sai com código 1 quando algum teste não passa. Ao concluir um trecho pela primeira vez, o ponto final vira a partida do trecho seguinte. `--update` substitui um ponto existente e `--fresh-memory` começa o trecho com a memória vazia.
+
+Fluxo de trabalho:
+
+1. Uma execução longa encontra um ciclo e grava o ponto de reprodução.
+2. O ponto vira um caso com `case-add`.
+3. A correção é testada no caso, em minutos.
+4. `case-run all` e `run all --jobs 4` confirmam que os outros casos e trechos continuam passando.
+5. A execução limpa desde o boot dá a evidência final.
+
+Os pontos salvos ficam em `output/`, fora do repositório, porque derivam da ROM.
 
 ## Estado em relação à spec
 

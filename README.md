@@ -247,7 +247,7 @@ Para iterar em um trecho do jogo sem rodar desde o boot, o agente salva estado e
 .venv/bin/python -m zelda_env.segments run chave-do-cemiterio --decisions 150
 ```
 
-Um trecho passa quando o objetivo é concluído sem corte de ciclo e sem impasse. Veja os [detalhes](docs/validation-agent.md#testes-por-trecho).
+Um trecho passa quando o objetivo é concluído sem corte de ciclo e sem impasse. Veja os [detalhes](docs/validation-agent.md#testes-por-trecho-e-por-caso).
 
 ### Supervisor opcional
 

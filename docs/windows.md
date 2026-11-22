@@ -88,7 +88,7 @@ A sessão fica em `output\agent\`: `latest.state` e `memory.json` para retomar, 
 .\.venv\Scripts\python.exe -m zelda_env.segments run chave-do-cemiterio --decisions 150
 ```
 
-Veja [Testes por trecho](validation-agent.md#testes-por-trecho) para o que cada comando faz.
+Veja [Testes por trecho e por caso](validation-agent.md#testes-por-trecho-e-por-caso) para o que cada comando faz.
 
 ## Supervisor opcional
 

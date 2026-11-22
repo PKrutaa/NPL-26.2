@@ -1,16 +1,23 @@
-"""Run one stretch of the game at a time, from a saved checkpoint to the next objective.
+"""Test the agent on one stretch of the game at a time.
 
-A full run from boot takes about an hour to reach the later objectives. A segment starts
-from the state and the agent memory saved when the previous objective was completed, so
-a change can be checked on the stretch it affects in minutes.
+A full run from boot takes about an hour to reach the later objectives. Two kinds of
+shorter test start from a saved game state plus the agent memory saved with it:
+
+- A segment goes from one completed objective to the next.
+- A case goes from any saved point (for example the one the agent writes when it cuts a
+  loop) to an objective or a room.
 
   python -m zelda_env.segments list
   python -m zelda_env.segments capture output/agent-limpa
   python -m zelda_env.segments run chave-do-cemiterio --decisions 150
-  python -m zelda_env.segments run all
+  python -m zelda_env.segments run all --jobs 4
+  python -m zelda_env.segments case-add pergunta-maku --state output/agent/falha-260.state \\
+      --until-room 00:48 --decisions 30
+  python -m zelda_env.segments case-run all --jobs 4
+  python -m zelda_env.segments report
 
-Checkpoints live in output/segments. A segment passes when the objective is completed
-within the budget with no loop cut and no impasse.
+Everything lives in output/segments. A test passes when it reaches its target within the
+budget with no loop cut and no impasse. The exit code is 1 when any test does not pass.
 """
 
 import argparse
@@ -20,12 +27,15 @@ import subprocess
 import sys
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from pathlib import Path
 
 from . import paths
 from .__main__ import add_common, resolve_common
 
 REPEAT_MOVES = 4  # a stretch made of at most this many distinct moves counts as repetition
+PASSED = "passou"
 
 
 def names():
@@ -53,6 +63,7 @@ def metrics(trace):
     return {
         "decisions": len(decisions),
         "reached": [name for record in decisions for name in record["reached"]],
+        "rooms": list(dict.fromkeys(record["after_room"] for record in decisions if record.get("after_room"))),
         "loop_cuts": events["loop_cut"], "impasses": events["impasse"],
         "dropped": sum(record["outcome"].startswith("failed") for record in decisions),
         "longest_repeat": longest if len(moves) > REPEAT_MOVES else 0,
@@ -60,6 +71,24 @@ def metrics(trace):
         "origins": dict(Counter(record["origin"] for record in decisions)),
         "survey_s": round(sum(survey) / len(survey), 1) if survey else 0.0,
     }
+
+
+def verdict(result, until=None, until_room=None, no_drops=False):
+    """Passing needs the target reached and nothing that signals a loop.
+
+    With `no_drops`, an option dropped because Link died or lost control also fails it.
+    """
+    done = until in result["reached"] if until else until_room in result["rooms"]
+    clean = not result["loop_cuts"] and not result["impasses"] and not (no_drops and result["dropped"])
+    return PASSED if done and clean else "concluiu com ciclo" if done else "não concluiu"
+
+
+def revision():
+    try:
+        return subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=paths.ROOT, capture_output=True,
+                              text=True, timeout=10).stdout.strip() or None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
 
 
 def checkpoint(directory, name):
@@ -81,39 +110,102 @@ def capture(directory, session, replace=False):
     return copied
 
 
-def run(directory, name, args):
-    """Run the agent from the checkpoint before `name` until `name` is completed."""
-    order = names()
-    before = order[order.index(name) - 1] if order.index(name) else None
-    command = [sys.executable, "-m", "zelda_env.agent", "--headless", "--fresh", "--until", name,
-               "--decisions", str(args.decisions), "--policy", args.policy,
-               "--directory", str(directory / "runs" / name), "--rom", str(args.rom)]
+def play(label, session, args, *, state=None, memory=None, until=None, until_room=None, decisions=200,
+         no_drops=False):
+    """Run the agent once from a saved point to a target and return what happened."""
+    command = [sys.executable, "-m", "zelda_env.agent", "--headless", "--fresh",
+               "--decisions", str(decisions), "--policy", args.policy,
+               "--directory", str(session), "--rom", str(args.rom)]
     if args.data_dir:
         command += ["--data-dir", str(args.data_dir)]
-    if before:
-        state, memory = checkpoint(directory, before)
-        if not state.is_file():
-            return {"segment": name, "status": "sem checkpoint", "needs": before}
+    if until:
+        command += ["--until", until]
+    if until_room:
+        command += ["--until-room", until_room]
+    if state:
         command += ["--seed-state", str(state)]
-        if memory.is_file() and not args.fresh_memory:
-            command += ["--seed-memory", str(memory)]
+    if memory:
+        command += ["--seed-memory", str(memory)]
     started = time.perf_counter()
-    session = directory / "runs" / name
-    session.mkdir(parents=True, exist_ok=True)
+    if session.exists():
+        shutil.rmtree(session)  # failure snapshots of an older run must not be mistaken for new ones
+    session.mkdir(parents=True)
     with (session / "agent.log").open("w", encoding="utf-8") as log:
         code = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT).returncode
     trace = session / "trace.jsonl"
     if code or not trace.is_file():
-        return {"segment": name, "status": "erro", "log": str(session / "agent.log")}
-    result = {"segment": name, "from": before or "boot", **metrics(trace),
-              "seconds": round(time.perf_counter() - started)}
-    done = name in result["reached"]
-    clean = not result["loop_cuts"] and not result["impasses"]
-    result["status"] = "passou" if done and clean else "concluiu com ciclo" if done else "não concluiu"
-    if done:
+        return {"test": label, "status": "erro", "log": str(session / "agent.log")}
+    result = {"test": label, **metrics(trace), "seconds": round(time.perf_counter() - started),
+              "target": until or until_room, "budget": decisions, "policy": args.policy,
+              "commit": revision(), "when": datetime.now().isoformat(timespec="seconds")}
+    result["status"] = verdict(result, until, until_room, no_drops)
+    del result["rooms"]
+    return result
+
+
+def run_segment(directory, name, args):
+    """From the checkpoint before `name` until `name` is completed."""
+    order = names()
+    before = order[order.index(name) - 1] if order.index(name) else None
+    state = memory = None
+    if before:
+        state, memory = checkpoint(directory, before)
+        if not state.is_file():
+            return {"test": name, "status": "sem checkpoint", "needs": before}
+        if not memory.is_file() or args.fresh_memory:
+            memory = None
+    session = directory / "runs" / name
+    result = play(name, session, args, state=state, memory=memory, until=name, decisions=args.decisions)
+    if name in result.get("reached", ()):
         # The first completion becomes the start of the next segment. --update replaces it.
         capture(directory, session, replace=args.update)
     return result
+
+
+def load_cases(directory):
+    cases = {}
+    for file in sorted((directory / "cases").glob("*/case.json")):
+        cases[file.parent.name] = json.loads(file.read_text(encoding="utf-8"))
+    return cases
+
+
+def add_case(directory, args):
+    folder = directory / "cases" / args.name
+    folder.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(args.state, folder / "start.state")
+    memory = args.memory or args.state.with_name(args.state.name.replace(".state", ".memory.json"))
+    has_memory = memory.is_file()
+    if has_memory:
+        shutil.copyfile(memory, folder / "start.memory.json")
+    case = {"until": args.until, "until_room": args.until_room, "decisions": args.decisions,
+            "note": args.note, "memory": has_memory, "no_drops": args.no_drops}
+    (folder / "case.json").write_text(json.dumps(case, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return case
+
+
+def run_case(directory, name, case, args):
+    folder = directory / "cases" / name
+    memory = folder / "start.memory.json" if case.get("memory") else None
+    return play(f"case:{name}", folder / "run", args, state=folder / "start.state", memory=memory,
+                until=case.get("until"), until_room=case.get("until_room"), decisions=case["decisions"],
+                no_drops=case.get("no_drops", False))
+
+
+def report(directory):
+    """Latest result of each test next to the one before it."""
+    history = {}
+    log = directory / "results.jsonl"
+    for line in log.read_text(encoding="utf-8").splitlines() if log.is_file() else ():
+        record = json.loads(line)
+        history.setdefault(record.get("test") or record.get("segment"), []).append(record)
+    rows = [("teste", "status", "decisões", "antes", "ciclos", "repetição", "s", "commit")]
+    for name, records in history.items():
+        last, before = records[-1], records[-2] if len(records) > 1 else {}
+        rows.append((name, last["status"], last.get("decisions", "-"), before.get("decisions", "-"),
+                     last.get("loop_cuts", "-"), last.get("longest_repeat", "-"), last.get("seconds", "-"),
+                     last.get("commit") or "-"))
+    widths = [max(len(str(row[index])) for row in rows) for index in range(len(rows[0]))]
+    return "\n".join("  ".join(str(cell).ljust(width) for cell, width in zip(row, widths)).rstrip() for row in rows)
 
 
 def main():
@@ -121,17 +213,34 @@ def main():
     add_common(parser)
     parser.add_argument("--directory", type=Path, help="Pasta dos checkpoints. Padrão: output/segments")
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("list", help="Mostra os trechos e quais têm checkpoint")
+    commands.add_parser("list", help="Mostra os trechos e os casos")
+    commands.add_parser("report", help="Último resultado de cada teste e o anterior")
     taking = commands.add_parser("capture", help="Copia os checkpoints de uma sessão do agente")
     taking.add_argument("session", type=Path)
     taking.add_argument("--update", action="store_true", help="Substitui checkpoints existentes")
     running = commands.add_parser("run", help="Roda um trecho, ou todos com 'all'")
     running.add_argument("segment", choices=[*names(), "all"])
     running.add_argument("--decisions", type=int, default=200, help="Orçamento de decisões por trecho")
-    running.add_argument("--policy", choices=("laya", "random", "shortest"), default="laya")
     running.add_argument("--fresh-memory", action="store_true", help="Começa o trecho com a memória vazia")
     running.add_argument("--update", action="store_true",
                          help="Ao concluir, substitui o checkpoint do objetivo pelo desta execução")
+    adding = commands.add_parser("case-add", help="Guarda um ponto salvo como caso de teste")
+    adding.add_argument("name")
+    adding.add_argument("--state", type=Path, required=True)
+    adding.add_argument("--memory", type=Path, help="Padrão: o .memory.json ao lado do estado, se existir")
+    target = adding.add_mutually_exclusive_group(required=True)
+    target.add_argument("--until", choices=names(), help="Objetivo que o caso precisa concluir")
+    target.add_argument("--until-room", help="Sala a que o caso precisa chegar")
+    adding.add_argument("--decisions", type=int, default=40)
+    adding.add_argument("--no-drops", action="store_true",
+                        help="Falha também se uma opção for descartada por morte ou perda de controle")
+    adding.add_argument("--note", default="", help="O que o caso reproduz")
+    casing = commands.add_parser("case-run", help="Roda um caso, ou todos com 'all'")
+    casing.add_argument("case")
+    for sub in (running, casing):
+        sub.add_argument("--policy", choices=("laya", "random", "shortest"), default="laya")
+        sub.add_argument("--jobs", type=int, default=1,
+                         help="Testes em paralelo. Com mais de um, os trechos não são encadeados")
     args = resolve_common(parser, parser.parse_args())
     directory = args.directory or paths.output_path("segments")
     order = names()
@@ -142,21 +251,56 @@ def main():
             memory = bool(start) and checkpoint(directory, start)[1].is_file()
             print(f"{name:22} parte de {start or 'boot':18} "
                   f"{'pronto' if ready else 'sem checkpoint'}{'' if memory or not ready or not start else ' (sem memória)'}")
+        for name, case in load_cases(directory).items():
+            print(f"case:{name:17} até {case.get('until') or case.get('until_room'):22} "
+                  f"{case['decisions']} decisões  {case.get('note', '')}")
+        return
+    if args.command == "report":
+        print(report(directory))
         return
     if args.command == "capture":
         copied = capture(directory, args.session, replace=args.update)
         print("Copiados: " + (", ".join(copied) if copied else "nenhum"))
         return
+    if args.command == "case-add":
+        print(json.dumps(add_case(directory, args), ensure_ascii=False))
+        return
+    if args.command == "case-run":
+        cases = load_cases(directory)
+        if args.case != "all" and args.case not in cases:
+            parser.exit(2, f"Caso desconhecido: {args.case}. Existentes: {', '.join(cases) or 'nenhum'}\n")
+        chosen = cases if args.case == "all" else {args.case: cases[args.case]}
+        jobs = [lambda name=name, case=case: run_case(directory, name, case, args) for name, case in chosen.items()]
+        chained = False
+    else:
+        chosen = order if args.segment == "all" else [args.segment]
+        if args.jobs > 1:
+            # In parallel each segment starts from its stored checkpoint, so only those that have one run.
+            chosen = [name for name in chosen
+                      if not order.index(name) or checkpoint(directory, order[order.index(name) - 1])[0].is_file()]
+        jobs = [lambda name=name: run_segment(directory, name, args) for name in chosen]
+        chained = args.segment == "all" and args.jobs == 1
     failed = False
-    for name in order if args.segment == "all" else [args.segment]:
-        result = run(directory, name, args)
-        directory.mkdir(parents=True, exist_ok=True)
+    directory.mkdir(parents=True, exist_ok=True)
+
+    def finish(result):
+        nonlocal failed
         with (directory / "results.jsonl").open("a", encoding="utf-8") as log:
             log.write(json.dumps(result, ensure_ascii=False) + "\n")
         print(json.dumps(result, ensure_ascii=False), flush=True)
-        failed |= result["status"] != "passou"
-        if result["status"] in ("sem checkpoint", "erro", "não concluiu") and args.segment == "all":
-            break  # the next segment starts where this one should have ended
+        failed |= result["status"] != PASSED
+
+    if args.jobs > 1:
+        with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+            for result in pool.map(lambda job: job(), jobs):
+                finish(result)
+    else:
+        for job in jobs:
+            result = job()
+            finish(result)
+            if chained and result["status"] in ("sem checkpoint", "erro", "não concluiu"):
+                break  # the next segment starts where this one should have ended
+    print(report(directory))
     sys.exit(1 if failed else 0)
 
 
