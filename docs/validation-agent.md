@@ -219,6 +219,25 @@ Até a decisão 265 da execução 7, o maior trecho com no máximo quatro movime
 
 O sexto objetivo (`chave-do-cemiterio`) ainda não foi concluído em execução limpa.
 
+## Testes por trecho
+
+Uma execução desde o boot leva cerca de uma hora até os objetivos mais distantes. Para iterar em um trecho só, o agente salva o estado do jogo e a própria memória a cada objetivo concluído, e `zelda_env/segments.py` roda de um desses pontos até o objetivo seguinte.
+
+```
+python -m zelda_env.segments list
+python -m zelda_env.segments capture output/agent-limpa
+python -m zelda_env.segments run chave-do-cemiterio --decisions 150
+python -m zelda_env.segments run all
+```
+
+- `list` mostra cada trecho, de onde ele parte e se o ponto de partida existe.
+- `capture` copia para `output/segments` os pontos salvos por uma sessão do agente.
+- `run` roda um trecho e imprime uma linha JSON com decisões, cortes de ciclo, impasses, opções descartadas, maior trecho repetitivo e tempo. O histórico fica em `output/segments/results.jsonl`.
+
+Um trecho passa quando o objetivo é concluído dentro do orçamento, sem corte de ciclo e sem impasse. O comando sai com código 1 quando algum trecho não passa. Ao concluir um trecho pela primeira vez, o ponto final vira a partida do trecho seguinte. `--update` substitui um ponto existente e `--fresh-memory` começa o trecho com a memória vazia.
+
+O teste por trecho serve para iterar. A evidência de que não há ciclos continua sendo a execução limpa desde o boot.
+
 ## Estado em relação à spec
 
 | Item da spec | Estado |

@@ -906,6 +906,10 @@ def main():
     parser.add_argument("--policy", choices=("laya", "random", "shortest"), default="laya",
                         help="Quem escolhe entre as opções novas. random e shortest são comparação")
     parser.add_argument("--seed", type=int, default=0, help="Semente de --policy random")
+    parser.add_argument("--seed-memory", type=Path,
+                        help="Memória do agente que acompanha --seed-state. Padrão: memória vazia")
+    parser.add_argument("--until", metavar="OBJETIVO", choices=[item[0] for item in OBJECTIVES],
+                        help="Para assim que este objetivo é concluído")
     args = resolve_common(parser, parser.parse_args())
     seed = args.seed_state or paths.output_path("inicio.state")
     directory = args.directory or paths.output_path("agent")
@@ -950,9 +954,10 @@ def main():
             with start.open("rb") as stream:
                 pyboy.load_state(stream)
             memory = None
-            if resume:
+            if resume or args.seed_memory:
                 try:
-                    memory = Memory.load(json.loads(memory_file.read_text(encoding="utf-8")))
+                    source = memory_file if resume else args.seed_memory
+                    memory = Memory.load(json.loads(source.read_text(encoding="utf-8")))
                 except ValueError as error:
                     # The game state is still good. Only what was tried where is forgotten.
                     print(f"{error}. A sessão continua do estado salvo, com memória nova.", flush=True)
@@ -974,8 +979,13 @@ def main():
                         if agent.decisions % 5 == 0 or len(agent.done) > reached:
                             save(pyboy, agent, latest, memory_file)
                             for name in agent.done[reached:]:
-                                save(pyboy, agent, directory / f"objetivo-{name}.state", None)
+                                # State and memory together: a later run can start from here.
+                                save(pyboy, agent, directory / f"objetivo-{name}.state",
+                                     directory / f"objetivo-{name}.memory.json")
                                 print(f"Objetivo concluído: {name}", flush=True)
+                        if args.until in agent.done:
+                            reason = "objetivo concluído"
+                            break
                 except (InterruptedError, KeyboardInterrupt):
                     reason = "interrompido"
                 else:
