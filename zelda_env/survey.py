@@ -27,6 +27,7 @@ ESSENCES = 0xC6BF
 TEXT_INDEX = 0xCBA2
 COLLISIONS = 0xCE00  # same 16-byte row stride as the layout
 INVENTORY_B, INVENTORY_A = 0xC688, 0xC689
+ITEM_COUNTS = slice(0xC6B0, 0xC6C0)  # bombs and the five kinds of seed, among others
 STORAGE = 0xC68A  # sixteen item slots shown in the menu
 SWORD = 0x05
 HEART = 4  # health is counted in quarter hearts
@@ -466,10 +467,12 @@ class Surveyor:
                     self._load(blocked)
                     wield(kit)
                     probe = ((action, 1), ("wait", 20))
+                    stock = bytes(self.shadow.memory[ITEM_COUNTS])
                     run_route(self.shadow, probe)
-                    if kit in tools and not self._changed(base_progress, base_layout, "playing"):
-                        # Some items act a moment later: an ember seed takes about a second
-                        # to burn what it lands on.
+                    spent = bytes(self.shadow.memory[ITEM_COUNTS]) != stock
+                    if spent and not self._changed(base_progress, base_layout, "playing"):
+                        # An item that was used up acts a moment later: an ember seed takes
+                        # about a second to burn what it lands on. Only then is the wait worth it.
                         slow = ("wait", 90)
                         run_route(self.shadow, (slow,))
                         probe = (*probe, slow)
