@@ -467,15 +467,25 @@ class Surveyor:
                     wield(kit)
                     probe = ((action, 1), ("wait", 20))
                     run_route(self.shadow, probe)
+                    if kit in tools and not self._changed(base_progress, base_layout, "playing"):
+                        # Some items act a moment later: an ember seed takes about a second
+                        # to burn what it lands on.
+                        slow = ("wait", 90)
+                        run_route(self.shadow, (slow,))
+                        probe = (*probe, slow)
                     if self.shadow.memory[HEALTH] < health - tolerance:
                         continue
                     if not self._changed(base_progress, base_layout, "playing"):
                         continue
                     probed = observe(self.shadow)
                     opened = probed.mode == "dialogue"
-                    if (event == "moved" and not opened and probed.mode == "playing"
+                    solid = 0 <= tile[1] * 16 + tile[0] < len(base_collisions) and base_collisions[tile[1] * 16 + tile[0]]
+                    if (event == "moved" and not opened and probed.mode == "playing" and not solid
                             and kit in tools and progress(self.shadow) == base_progress):
-                        continue  # only the tool hitting open ground; listed with the ground options
+                        # Only the tool hitting open ground; listed with the ground options.
+                        # A solid tile is different: the ground probe may have been a few
+                        # pixels too far for the item to reach it (an ember seed on a sapling).
+                        continue
                     # The id carries what would happen now. A character with something
                     # new to say is a new option; the same line again is not.
                     # Two different effects on one tile (touching a chest, then opening it)
