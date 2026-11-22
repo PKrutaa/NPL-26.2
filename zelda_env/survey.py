@@ -27,6 +27,7 @@ ESSENCES = 0xC6BF
 TEXT_INDEX = 0xCBA2
 COLLISIONS = 0xCE00  # same 16-byte row stride as the layout
 INVENTORY_B, INVENTORY_A = 0xC688, 0xC689
+CUBE_COLOR, CUBE_POSITION = 0xCCAD, 0xCCAE  # the rolling cube of the dungeons
 ITEM_COUNTS = slice(0xC6B0, 0xC6C0)  # bombs and the five kinds of seed, among others
 STORAGE = 0xC68A  # sixteen item slots shown in the menu
 SWORD = 0x05
@@ -522,6 +523,11 @@ class Surveyor:
                     break
                 if not pushes:
                     continue  # the push probe is the slowest; the quick pass leaves it out
+                # An object that moves when pushed is named by where it is, and the rolling
+                # cube also by the face that is up: the same push from a new place is a new option.
+                if entity:
+                    cube = self.shadow.memory[CUBE_POSITION] and f":{self.shadow.memory[CUBE_COLOR]}" or ""
+                    target = f"{target}@{entity['x'] // 16}:{entity['y'] // 16}{cube}"
                 if f"push:{target}:{direction}" in found or push_tries.get((target, direction), 0) >= 2:
                     continue  # known, or tried from two standing spots already
                 push_tries[(target, direction)] = push_tries.get((target, direction), 0) + 1
