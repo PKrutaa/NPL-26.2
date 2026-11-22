@@ -355,3 +355,19 @@ def test_redoing_what_opened_a_way_is_bounded_per_story_state():
         assert memory.fresh("00:7a@0", [cut]) == [cut]  # the way west is closed again
         memory.record("00:7a@0", cut.id)
     assert memory.fresh("00:7a@0", [cut]) == []
+
+
+def test_the_goal_direction_with_an_untaken_exit_comes_before_the_known_way():
+    made = agent()
+    south = Option("exit:C", "exit", "south", (), "C", "Go south")
+    east = Option("exit:D", "exit", "east", (), "D", "Go east")
+    node = node_of("A", [south, east])
+    made.memory.arrive(node, [south, east])
+    made.memory.record(node, south.id)  # the way south is known; the gate to the east just opened
+    captured = []
+    made.policy.choose = lambda context, criteria: (captured.append(context["goal"]) or sorted(criteria)[0], {})
+    option, origin, _ = made.decide(OBS, node, [south, east], "Go south or east.")
+    assert captured == [] and option is east and origin == "forced"
+    made.memory.record(node, east.id)
+    option, _, _ = made.decide(OBS, node, [south, east], "Go south or east.")
+    assert option is south  # nothing new: the known way toward the goal is offered again

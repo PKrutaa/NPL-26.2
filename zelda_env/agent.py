@@ -565,7 +565,10 @@ class Agent:
             if len(wanted) > 1:
                 # Laya follows one direction far better than two. Name the first that has an
                 # exit. With no exit either way, the way there goes around: explore instead.
-                offered = [way for way in wanted if any(toward(option, f"Go {way}") for option in [*fresh, *ways])]
+                # A direction with an exit never taken comes before one that only has the
+                # way Link already knows: after a gate opens, the new way is the one to try.
+                offered = [way for way in wanted if any(toward(option, f"Go {way}") for option in fresh)] or [
+                    way for way in wanted if any(toward(option, f"Go {way}") for option in ways)]
                 hint = f"Go {offered[0]}." if offered else "Go to a new room."
             goal = hint[:-1]
             # After a trip to an area because something there is untried, only the untried
