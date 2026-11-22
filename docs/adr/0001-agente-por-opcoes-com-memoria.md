@@ -92,13 +92,13 @@ Quando a sala de referência do objetivo já foi visitada, o agente segue o mapa
 A sala de referência de uma etapa pode ter partes que não se ligam, e a tarefa fica em uma só delas. Quatro regras tratam isso:
 
 - **Entrada nova primeiro.** Uma saída ainda não usada que leva à sala de referência vem antes de qualquer caminho conhecido.
-- **Parte esgotada.** Quando não sobra nada a fazer na parte em que Link está, ela é marcada como esgotada. Os caminhos conhecidos deixam de mirar essa parte.
+- **Parte esgotada.** Quando não sobra nada a fazer na parte em que Link está, ela é marcada como esgotada. Os caminhos conhecidos deixam de mirar essa parte. A marca vale enquanto a etapa do objetivo for a mesma, mesmo que a história avance em outro lugar.
 - **Refazer a tarefa tem limite.** Na sala de referência, o que combina com a tarefa pode ser refeito, até três vezes por ação.
 - **Avanço de etapa.** A etapa só avança quando Link sai da sala de referência para um mapa nunca visto ou para o mapa da etapa seguinte. Uma etapa de conversa também avança quando a conversa faz a história andar.
 
 ### Abertura de caminho
 
-Quando uma ação faz surgir uma saída, o agente guarda a ação como o que abre aquela saída e a refaz quando a saída está fechada. Só conta como abertura a saída que surge com mudança de terreno ou depois de uma conversa. Uma saída que apareceu porque o levantamento seguinte foi mais detalhado não é atribuída à ação.
+Quando uma ação faz surgir uma saída, o agente guarda a ação como o que abre aquela saída e a refaz quando a saída está fechada. A saída recém-aberta é tomada na decisão seguinte, antes de qualquer rota conhecida. Refazer a ação para reabrir a saída tem limite de duas vezes por estado da história. Só conta como abertura a saída que surge com mudança de terreno ou depois de uma conversa. Uma saída que apareceu porque o levantamento seguinte foi mais detalhado não é atribuída à ação.
 
 ### Perguntas no diálogo
 

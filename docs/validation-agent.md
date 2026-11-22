@@ -220,7 +220,7 @@ Até a decisão 265 da execução 7, o maior trecho com no máximo quatro movime
 
 O sexto objetivo ainda não foi concluído em execução limpa desde o boot. Ele foi concluído no teste por trecho, descrito abaixo.
 
-### Sexto e sétimo objetivos no teste por trecho
+### Sexto, sétimo e oitavo objetivos no teste por trecho
 
 Os trechos partem do ponto salvo pela execução 9 ao salvar a Árvore Maku, com a memória do agente daquele momento.
 
@@ -228,6 +228,7 @@ Os trechos partem do ponto salvo pela execução 9 ao salvar a Árvore Maku, com
 | --- | --- | --- | --- | --- | --- |
 | `sacola-de-sementes` | Passou | 6 | 0 | 0 | 4 |
 | `chave-do-cemiterio` | Passou | 64 | 0 | 0 | 6 |
+| `dungeon-1` | Concluiu com ciclo na primeira rodada (88 decisões, 1 corte). Passou depois das correções. | 37 | 0 | 0 | 5 |
 
 O que impedia o trecho da chave, na ordem em que apareceu:
 
@@ -237,6 +238,9 @@ O que impedia o trecho da chave, na ordem em que apareceu:
 | O caminho para o cemitério é fechado por um broto que só queima com semente de brasa. O levantamento esperava 20 quadros pelo efeito do item, e a semente leva cerca de um segundo. | O teste de obstáculo espera mais quando o item não mostra efeito na hora, e um bloco sólido deixa de ser tratado como chão livre. |
 | Depois de queimar o broto, a etapa não avançava e o agente voltava para `00:6a`. | Uma etapa de conversa ou de obstáculo avança quando a história anda. |
 | A sala de referência da chave era `00:7c`. A caverna fica em `00:8d`. | Sala de referência corrigida a partir dos dados de warp do disassembly. |
+| Depois de abrir o portão do cemitério com a chave, o agente seguia a rota conhecida e só usava a saída nova 50 decisões depois. | Uma saída que a última ação abriu é tomada antes de qualquer rota conhecida. |
+| Abrir o portão mudava o estado da história e apagava a marca de parte esgotada da sala de referência. A rota voltava a apontar para a parte da caverna. | A marca de parte esgotada vale por etapa do objetivo. |
+| Com o objetivo em duas direções, o agente nomeava a primeira que tivesse qualquer saída, mesmo já usada. | A direção com saída ainda não usada vem primeiro. |
 | Um arbusto que volta a crescer era cortado a cada visita para reabrir um caminho que ninguém ia usar. | Limite de duas repetições por estado da história. |
 
 ## Testes por trecho e por caso
