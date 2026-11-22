@@ -427,3 +427,17 @@ def test_the_sweep_does_not_go_straight_back_to_the_room_link_came_from():
     made.entered_from = "B"  # the oldest seen, but Link has just come from it
     obs = SimpleNamespace(room="A", x=10, y=20, facing="up")
     assert made.decide(obs, node, here, "Go to a new room.")[:2] == (here[1], "sweep")
+
+
+def test_coming_back_to_a_dungeon_room_makes_its_pushes_new_a_limited_number_of_times():
+    memory = Memory()
+    push, talk = option("push:slot4@10:7:1:up", "push"), option("interact:slot2:talk:text0001")
+    memory.arrive("04:20@0", [push, talk])
+    memory.record("04:20@0", push.id)
+    memory.record("04:20@0", talk.id)
+    for _ in range(4):
+        memory.revisit("04:20@0")
+        assert memory.fresh("04:20@0", [push, talk]) == [push]  # the talk stays done
+        memory.record("04:20@0", push.id)
+    memory.revisit("04:20@0")
+    assert memory.fresh("04:20@0", [push, talk]) == []

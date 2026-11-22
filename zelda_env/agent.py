@@ -36,7 +36,7 @@ TOOL_USES_PER_AREA = 10
 REOPENS = 2  # times per story state an action is redone because the way it opened is closed again
 GOAL_REUSES = 2  # times a known exit toward the goal is offered again per story state
 TASK_REDOS = 30  # decisions per area and story state that may redo what the task asks
-ROOM_REVISITS = 8  # times per story state a dungeon room's actions become available again
+ROOM_REVISITS = 4  # times per story state a dungeon room's actions become available again
 LONG_WINDOW, LONG_REPEATS = 80, 6  # one move made this many times within that many decisions
 LOOP_WINDOW, LOOP_MOVES = 12, 4  # that many decisions made of at most this many distinct moves
 RECIPE_STEPS = 12
@@ -237,15 +237,15 @@ class Memory:
         self.current["pending"][node] = [option.id for option in self.fresh(node, options)]
 
     def revisit(self, node):
-        """Rooms of a dungeon reset when Link leaves. On coming back, what was done in the
-        room counts as not done, a limited number of times per story state."""
+        """Rooms of a dungeon reset when Link leaves: what he pushed is back where it was.
+        On coming back, the pushes count as not done, a limited number of times per story
+        state. Everything else is crossed again by recipe."""
         visits = self.current.setdefault("visits", {})
         visits[node] = visits.get(node, 0) + 1
         if visits[node] > ROOM_REVISITS:
             return
         for key in [key for key in self.current["tried"]
-                    if key.startswith(f"{node}|") and not key.split("|", 1)[1].startswith("exit:")
-                    and key not in self.current.get("stale", [])]:
+                    if key.startswith(f"{node}|push:") and key not in self.current.get("stale", [])]:
             del self.current["tried"][key]
 
     def record(self, node, option_id):
@@ -750,6 +750,9 @@ class Agent:
         self.arrival = (None, None)
         back_in_dungeon = (came_from and came_from != node and getattr(self, "focus", None) is not None
                            and self.pyboy.memory[DUNGEON_INDEX] == self.focus)
+        if back_in_dungeon:
+            self.memory.revisit(node)
+            self.memory.arrive(node, options)
         # Crossing a room that reset is done by recipe, not by treating everything as new.
         depth = self.memory.current.setdefault("depth", {})
         level = 0
@@ -763,6 +766,9 @@ class Agent:
         dead_end = sum(option.kind == "exit" for option in options) <= 1 and not plain.get(examined)
         # A dungeon room that reset needs the closer look again: pushes are only found there.
         dead_end = dead_end or bool(back_in_dungeon)
+        # So does a room where Link has just pushed something: what moved can be pushed
+        # again from where it is now, and that is how a block reaches its place.
+        dead_end = dead_end or bool(self.last and self.last[0] == node and self.last[1].startswith("push:"))
         while level < len(SURVEY_LEVELS) - 1 and (dead_end or not self.memory.fresh(node, options)):
             found = {option.id for option in options}
             owed = [item for item in self.memory.current["pending"].get(node, []) if item not in found]
