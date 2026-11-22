@@ -73,7 +73,12 @@ OBJECTIVES = (
     ("maku-tree-salva", (("01:48", "Use the item on the ground or enter the door or stairs."),),
      "Go to a new room.",
      _flag(GLOBAL_FLAGS, 0x12), 0x0D),
-    ("chave-do-cemiterio", (("01:48", "Enter the door or stairs."), ("00:38", "Talk to the character."),
+    # The grown Maku Tree drops the Seed Satchel after the talk. Its ember seeds burn the
+    # sapling that closes the way to the graveyard.
+    ("sacola-de-sementes", (("01:48", "Enter the door or stairs."),
+                            ("00:38", "Talk to the character or walk into the event.")),
+     "Enter the door or stairs.", _flag(TREASURES, 0x19)),
+    ("chave-do-cemiterio", (("00:6a", "Use the item on the obstacle to the east."),
                             ("00:7c", "Enter the door or stairs.")),
      "Enter the door or stairs.", _flag(TREASURES, 0x42)),
     ("dungeon-1", (("00:8d", "Enter the door or stairs."),), "Enter the door or stairs.",
