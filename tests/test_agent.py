@@ -333,3 +333,13 @@ def test_a_talk_that_moves_the_story_ends_the_step_at_that_landmark(monkeypatch)
     assert made.objective("00:38") == ("chave", "Talk to the character.")  # same story state: still to do
     made.memory.enter(b"after the talk")
     assert made.objective("00:38") == ("chave", "Go south or east.")
+
+
+def test_redoing_what_opened_a_way_is_bounded_per_story_state():
+    memory = Memory()
+    cut, west = option("interact:2:6:05:eventc53a"), option("exit:00:79/5", "exit", "00:79")
+    memory.unlocked("00:7a@0", cut.id, {west.id})
+    for _ in range(3):
+        assert memory.fresh("00:7a@0", [cut]) == [cut]  # the way west is closed again
+        memory.record("00:7a@0", cut.id)
+    assert memory.fresh("00:7a@0", [cut]) == []

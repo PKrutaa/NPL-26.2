@@ -33,6 +33,7 @@ TEXT_OPTION_SELECTED = (7, 0xD0E8)
 MEMORY_FORMAT = 7
 TALKS_PER_CHARACTER = 3
 TOOL_USES_PER_AREA = 10
+REOPENS = 2  # times per story state an action is redone because the way it opened is closed again
 GOAL_REUSES = 2  # times a known exit toward the goal is offered again per story state
 TASK_REDOS = 30  # decisions per area and story state that may redo what the task asks
 ROOM_REVISITS = 8  # times per story state a dungeon room's actions become available again
@@ -203,7 +204,9 @@ class Memory:
             if f"{node}|{option.id}" in self.current.get("stale", []):
                 return False  # it was part of a loop: no longer something to redo
             ways = self.opened.get(f"{node}|{option.id}")
-            return bool(ways) and not set(ways) <= offered
+            # Bounded: a bush that grows back would otherwise be cut on every visit, to
+            # open a way nobody is taking.
+            return bool(ways) and not set(ways) <= offered and self.tries(node, option.id) <= REOPENS
 
         return [option for option in options
                 if (node, option.id) not in self.banned and (reopens(option) or (
