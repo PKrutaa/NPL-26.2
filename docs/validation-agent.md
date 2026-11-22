@@ -298,6 +298,9 @@ python -m zelda_env.segments report
 - `case-add` guarda um ponto salvo como caso, com o alvo e o orçamento de decisões. `--no-drops` faz o caso falhar também quando uma opção é descartada por morte ou perda de controle.
 - `case-run` roda um caso ou todos.
 - `report` mostra o último resultado de cada teste ao lado do anterior, com o commit.
+- `inspect` mostra o que o agente vê em um estado salvo: sala, itens, blocos com colisão, objetos e as opções do levantamento. Salva também a imagem da tela.
+
+O agente grava um ponto a cada 10 decisões em `pontos/` dentro da sessão. `case-add --run <sessão> --decision N` cria um caso a partir do último ponto até a decisão N. `run` aceita vários trechos de uma vez, e `--jobs` roda um emulador por núcleo.
 
 Cada execução imprime uma linha JSON com decisões, cortes de ciclo, impasses, opções descartadas, maior trecho repetitivo e tempo. O histórico fica em `output/segments/results.jsonl`.
 

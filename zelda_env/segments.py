@@ -14,7 +14,10 @@ shorter test start from a saved game state plus the agent memory saved with it:
   python -m zelda_env.segments run pa maku-tree-salva --jobs 2
   python -m zelda_env.segments case-add pergunta-maku --state output/agent/falha-260.state \\
       --until-room 00:48 --decisions 30
+  python -m zelda_env.segments case-add portao --run output/agent --decision 361 \\
+      --until dungeon-1 --decisions 40
   python -m zelda_env.segments case-run all --jobs 4
+  python -m zelda_env.segments inspect output/agent/pontos/00360.state
   python -m zelda_env.segments report
 
 Everything lives in output/segments. A test passes when it reaches its target within the
@@ -174,7 +177,19 @@ def load_cases(directory):
     return cases
 
 
+def snapshot_before(run, decision):
+    """The latest snapshot a session kept at or before a decision."""
+    points = sorted(point for point in (run / "pontos").glob("*.state") if int(point.stem) <= decision)
+    if not points:
+        raise SystemExit(f"Nenhum ponto salvo em {run / 'pontos'} até a decisão {decision}")
+    return points[-1]
+
+
 def add_case(directory, args):
+    if args.state is None:
+        if args.run is None or args.decision is None:
+            raise SystemExit("Informe --state, ou --run com --decision")
+        args.state = snapshot_before(args.run, args.decision)
     folder = directory / "cases" / args.name
     folder.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(args.state, folder / "start.state")
@@ -194,6 +209,52 @@ def run_case(directory, name, case, args):
     return play(f"case:{name}", folder / "run", args, state=folder / "start.state", memory=memory,
                 until=case.get("until"), until_room=case.get("until_room"), decisions=case["decisions"],
                 no_drops=case.get("no_drops", False))
+
+
+def inspect(args):
+    """Print what the agent would see at a saved state, and save a picture of the screen."""
+    from io import BytesIO
+
+    from pyboy import PyBoy
+
+    from .adapter import enemies, health, observe
+    from .agent import SURVEY_LEVELS
+    from .survey import Surveyor
+
+    pyboy = PyBoy(str(args.rom), window="null", ram_file=BytesIO(bytes(paths.SRAM_BYTES)), sound_volume=0)
+    surveyor = Surveyor(args.rom)
+    try:
+        with args.state.open("rb") as stream:
+            pyboy.load_state(stream)
+        memory, seen = pyboy.memory, observe(pyboy)
+        print(f"sala {seen.room}  modo {seen.mode}  xy {seen.x},{seen.y}  vida {health(pyboy)}")
+        print(f"botões B/A {memory[0xC688]:02x}/{memory[0xC689]:02x}  guardados "
+              f"{' '.join(f'{item:02x}' for item in memory[0xC68A:0xC69A] if item) or '-'}")
+        large = memory[0xCD01] != 1
+        width, height = (15, 11) if large else (10, 8)
+        print("blocos (colisão marcada com *):")
+        for row in range(height):
+            print(" ".join(f"{memory[0xCF00 + row * 16 + column]:02x}"
+                           f"{'*' if memory[0xCE00 + row * 16 + column] else ' '}" for column in range(width)))
+        for kind, offset in (("interação", 0x40), ("inimigo", 0x80), ("parte", 0xC0)):
+            for high in range(0xD0, 0xE0):
+                address = high * 256 + offset
+                if memory[1, address]:
+                    print(f"{kind} id {memory[1, address + 1]:02x} subid {memory[1, address + 2]:02x} "
+                          f"xy {memory[1, address + 0x0D]},{memory[1, address + 0x0B]}")
+        print(f"inimigos vivos: {enemies(pyboy)}")
+        started = time.perf_counter()
+        options = surveyor.options(pyboy, **SURVEY_LEVELS[args.level])
+        print(f"opções no nível {args.level} ({time.perf_counter() - started:.1f} s):")
+        for option in options:
+            print(f"  {option.id:36} {option.short or option.description}  ({len(option.route)} passos)")
+        pyboy.tick(1, render=True)
+        picture = args.picture or args.state.with_suffix(".png")
+        pyboy.screen.image.resize((480, 432)).save(picture)
+        print(f"imagem: {picture}")
+    finally:
+        surveyor.close()
+        pyboy.stop(save=False)
 
 
 def report(directory):
@@ -220,6 +281,10 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("list", help="Mostra os trechos e os casos")
     commands.add_parser("report", help="Último resultado de cada teste e o anterior")
+    looking = commands.add_parser("inspect", help="Mostra sala, blocos, objetos e opções de um estado salvo")
+    looking.add_argument("state", type=Path)
+    looking.add_argument("--level", type=int, choices=(0, 1, 2), default=1, help="Nível do levantamento")
+    looking.add_argument("--picture", type=Path, help="Onde salvar a imagem. Padrão: ao lado do estado")
     taking = commands.add_parser("capture", help="Copia os checkpoints de uma sessão do agente")
     taking.add_argument("session", type=Path)
     taking.add_argument("--update", action="store_true", help="Substitui checkpoints existentes")
@@ -232,7 +297,10 @@ def main():
                          help="Ao concluir, substitui o checkpoint do objetivo pelo desta execução")
     adding = commands.add_parser("case-add", help="Guarda um ponto salvo como caso de teste")
     adding.add_argument("name")
-    adding.add_argument("--state", type=Path, required=True)
+    adding.add_argument("--state", type=Path, help="Estado salvo de onde o caso parte")
+    adding.add_argument("--run", type=Path, help="Pasta de uma sessão do agente, usada com --decision")
+    adding.add_argument("--decision", type=int,
+                        help="Parte do último ponto salvo pela sessão até esta decisão")
     adding.add_argument("--memory", type=Path, help="Padrão: o .memory.json ao lado do estado, se existir")
     target = adding.add_mutually_exclusive_group(required=True)
     target.add_argument("--until", choices=names(), help="Objetivo que o caso precisa concluir")
@@ -260,6 +328,9 @@ def main():
         for name, case in load_cases(directory).items():
             print(f"case:{name:17} até {case.get('until') or case.get('until_room'):22} "
                   f"{case['decisions']} decisões  {case.get('note', '')}")
+        return
+    if args.command == "inspect":
+        inspect(args)
         return
     if args.command == "report":
         print(report(directory))

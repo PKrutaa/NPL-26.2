@@ -41,6 +41,7 @@ LONG_WINDOW, LONG_REPEATS = 80, 6  # one move made this many times within that m
 LOOP_WINDOW, LOOP_MOVES = 12, 4  # that many decisions made of at most this many distinct moves
 RECIPE_STEPS = 12
 SWEEP_LIMIT = 80  # sweep decisions without story progress before declaring an impasse
+SNAPSHOT_EVERY = 10  # decisions between the snapshots a run keeps on disk
 FAILURE_LOOKBACK = 6  # snapshots kept, one every five decisions
 MAX_HOPS = 14  # consecutive trips to a pending area with nothing new found
 SURVEY_LEVELS = (
@@ -1041,6 +1042,12 @@ def main():
                             agent.memory.decisions = agent.decisions
                             history.append((agent.decisions, snapshot.getvalue(),
                                             json.dumps(agent.memory.dump()).encode("utf-8")))
+                            if agent.decisions % SNAPSHOT_EVERY == 0:
+                                # Any moment of a run can become the start of a test case.
+                                points = directory / "pontos"
+                                points.mkdir(exist_ok=True)
+                                paths.atomic_write(points / f"{agent.decisions:05d}.state", history[-1][1])
+                                paths.atomic_write(points / f"{agent.decisions:05d}.memory.json", history[-1][2])
                         if not agent.step():
                             reason = "impasse"
                             keep_failure()
