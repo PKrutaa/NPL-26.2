@@ -78,9 +78,10 @@ OBJECTIVES = (
     ("sacola-de-sementes", (("01:48", "Enter the door or stairs."),
                             ("00:38", "Talk to the character or walk into the event.")),
      "Enter the door or stairs.", _flag(TREASURES, 0x19)),
+    # The key is in a cave in room 00:8d. It appears when the two torches inside are lit.
     ("chave-do-cemiterio", (("00:6a", "Use the item on the obstacle to the east."),
-                            ("00:7c", "Enter the door or stairs.")),
-     "Enter the door or stairs.", _flag(TREASURES, 0x42)),
+                            ("00:8d", "Enter the door or stairs.")),
+     "Use the item on the obstacle or pick up the item.", _flag(TREASURES, 0x42)),
     ("dungeon-1", (("00:8d", "Enter the door or stairs."),), "Enter the door or stairs.",
      lambda pyboy: bool(pyboy.memory[GROUP4_ROOM_FLAGS + 0x24] & ROOM_VISITED)),
     ("essencia-1", (), "Go to a new room.", lambda pyboy: bool(pyboy.memory[ESSENCES] & 1), 0x01),
