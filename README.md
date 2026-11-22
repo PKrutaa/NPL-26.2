@@ -314,7 +314,7 @@ A janela de jogo usa o teclado do PyBoy e avança um frame por `tick()`. O smoke
 
 ## Próximo passo
 
-O agente conclui sozinho, desde o boot, os cinco primeiros objetivos: espada, Árvore Maku, viagem ao passado, pá e salvar a Árvore Maku. O sexto, a chave do cemitério, ainda não foi concluído em execução limpa. Para a primeira dungeon faltam chefes, projéteis e recuperação de corações. A validação em máquinas Windows e Linux reais também está pendente.
+O agente vai sozinho do boot até entrar na primeira dungeon: oito objetivos em 293 decisões, sem corte de ciclo, sem impasse e sem morte (execução 10 da [validação](docs/validation-agent.md)). Dentro da dungeon ainda faltam chefes, projéteis e recuperação de corações. A validação em máquinas Windows e Linux reais também está pendente.
 
 O [ADR 0001](docs/adr/0001-agente-por-opcoes-com-memoria.md) explica como o agente funciona e o que ele não cobre. A [validação do agente](docs/validation-agent.md) traz os números e o estado de cada item da spec. A [proposta de arquitetura](docs/architecture-brainstorm.md) registra o desenho original. A [pesquisa sobre Oracle of Ages](docs/research-oracle-of-ages.md) reúne as referências para a leitura de memória.
 

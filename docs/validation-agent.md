@@ -205,6 +205,7 @@ A métrica de ciclo é o maior trecho de decisões seguidas formado por no máxi
 | 7 | 5 objetivos em 265 decisões, sem corte de ciclo e sem impasse até ali. Primeiro corte na decisão 377, no sexto objetivo. | O marco do sexto objetivo apontava para a sala errada. A etapa avançava ao entrar de novo na dungeon já percorrida. A lista de doze opções cortava a que o objetivo pedia. | Marco corrigido para a sala do portal. A etapa só avança em mapa novo ou no mapa da etapa seguinte. As opções que o objetivo pede ficam na lista. |
 | 8 | 5 objetivos em 262 decisões, sem corte de ciclo e sem impasse até ali. Primeiro corte na decisão 365, no sexto objetivo. | A conversa com a Árvore Maku termina numa pergunta. Confirmar a primeira resposta repete a explicação sem fim, e a opção era descartada. Em `00:7a`, saídas achadas por uma varredura mais detalhada foram registradas como abertas pela última interação, que passou a ser refeita a cada visita. | Uma pergunta que volta recebe a resposta seguinte. Só conta como abertura a saída que surge com mudança de terreno ou depois de uma conversa. |
 | 9 | 5 objetivos em 262 decisões, sem corte de ciclo e sem impasse. Encerrada ali para gerar o ponto de partida do trecho da chave do cemitério. | Não se aplica. | Não se aplica. |
+| 10 | 8 objetivos em 293 decisões, do boot até entrar na dungeon 1. Nenhum corte de ciclo, nenhum impasse, nenhuma opção descartada e nenhuma morte. | Não se aplica. | Não se aplica. |
 
 Decisões por objetivo na execução 7:
 
@@ -218,7 +219,34 @@ Decisões por objetivo na execução 7:
 
 Até a decisão 265 da execução 7, o maior trecho com no máximo quatro movimentos distintos tem 13 decisões. A origem das 379 decisões da execução: 209 do Laya, 75 forçadas (uma só opção nova), 54 de fronteira, 15 de rota, 12 de varredura, 10 de receita e 4 de rodízio. O levantamento levou em média 15 s por decisão.
 
-O sexto objetivo ainda não foi concluído em execução limpa desde o boot. Ele foi concluído no teste por trecho, descrito abaixo.
+### Execução 10: do boot à dungeon 1
+
+A execução 10 rodou com `--until dungeon-1`, a partir do seed do boot, com memória vazia, sem janela e sem supervisor. Parou sozinha ao entrar na dungeon 1, depois de 92 minutos.
+
+| Objetivo | Decisão |
+| --- | --- |
+| `espada` | 23 |
+| `maku-tree` | 34 |
+| `passado` | 36 |
+| `pa` | 84 |
+| `maku-tree-salva` | 206 |
+| `sacola-de-sementes` | 219 |
+| `chave-do-cemiterio` | 244 |
+| `dungeon-1` | 293 |
+
+| Medida | Valor |
+| --- | --- |
+| Cortes de ciclo | 0 |
+| Impasses | 0 |
+| Opções descartadas por morte ou perda de controle | 0 |
+| Maior trecho com no máximo quatro movimentos distintos | 7 decisões |
+| Movimento mais repetido | 4 vezes |
+| Origem das decisões | 165 do Laya, 61 forçadas, 31 de rota, 21 de fronteira, 14 de varredura, 1 de rodízio |
+| Tempo médio de levantamento | 18,3 s por decisão |
+
+Esta execução usou o código de um commit antes da última mudança, que só reduz o tempo de espera no teste de obstáculo. Os objetivos seguintes (`essencia-1` em diante) ainda não foram alcançados.
+
+As correções que levaram do quinto ao oitavo objetivo foram feitas no teste por trecho, descrito abaixo.
 
 ### Sexto, sétimo e oitavo objetivos no teste por trecho
 
