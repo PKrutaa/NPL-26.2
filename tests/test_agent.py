@@ -311,3 +311,13 @@ def test_what_the_goal_asks_for_is_never_cut_from_a_long_list():
     made.memory.arrive(node, options)
     made.decide(OBS, node, options, "Enter the door or stairs.")
     assert "Enter the door or stairs" in made.policy.asked[0].values()
+
+
+def test_an_exit_found_by_a_closer_look_is_not_credited_to_the_last_action():
+    made = agent()
+    made.last = ("00:7a@0", "interact:2:6:05:eventc53a", {"exit:00:6a/3"}, b"same")
+    made.note_opening("00:7a@0", {"exit:00:6a/3", "exit:00:79/5"}, b"same")
+    assert made.memory.opened == {}
+    made.last = ("04:0c@0", "push:7:4:up", set(), b"before")
+    made.note_opening("04:0c@0", {"exit:04:0a/7"}, b"after")
+    assert made.memory.opened == {"04:0c@0|push:7:4:up": ["exit:04:0a/7"]}

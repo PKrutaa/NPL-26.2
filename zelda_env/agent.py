@@ -27,6 +27,9 @@ from .survey import ESSENCES, HEALTH, OVERWORLD, Surveyor, progress, run_route
 GLOBAL_FLAGS = 0xC6D0
 TREASURES = 0xC69A
 TEXT_DISPLAY_STATE = (7, 0xD0C0)
+TEXT_DISPLAY_MODE = 0xCBA1  # 1 while a textbox waits for one of its choices
+TEXT_OPTION_POSITIONS = range(0xD0E0, 0xD0E8)  # bank 7: one byte per choice on screen
+TEXT_OPTION_SELECTED = (7, 0xD0E8)
 MEMORY_FORMAT = 7
 TALKS_PER_CHARACTER = 3
 TOOL_USES_PER_AREA = 10
@@ -425,8 +428,20 @@ class Agent:
     def settle(self, budget=2400):
         """Run cutscenes and dialogue until Link is controllable again."""
         quiet = 0
+        asked, asking = 0, False
         for _ in range(budget):
             obs = observe(self.pyboy)
+            choices = sum(bool(self.pyboy.memory[7, address]) for address in TEXT_OPTION_POSITIONS)
+            if obs.mode == "dialogue" and self.pyboy.memory[TEXT_DISPLAY_MODE] == 1 and choices:
+                # A question with choices. The first answer can bring the same question
+                # back ("Must I say it again?"), so each time it returns the next one is given.
+                if not asking:
+                    asked, asking = asked + 1, True
+                wanted = (asked - 1) % max(choices, 2)
+                moved = self.pyboy.memory[TEXT_OPTION_SELECTED] == wanted
+                execute(self.pyboy, "press_a" if moved else "press_right", hold_frames=8, render=self.watch)
+                continue
+            asking = False
             if obs.mode == "playing":
                 quiet += 1
                 # Scenes return to normal mode between lines while inputs are still ignored.
@@ -653,6 +668,16 @@ class Agent:
         # The origin names who chose, so a comparison run is never attributed to Laya.
         return chosen(keys[key], getattr(self, "label", "laya"), {**details, "laya": laya})
 
+    def note_opening(self, node, exits_now, terrain):
+        """Remember the last action as what opened the exits that appeared after it.
+
+        An exit that a closer look found is not an exit that the action opened. Opening
+        one changes the terrain, or comes from a talk.
+        """
+        if self.last and self.last[0] == node and exits_now - self.last[2] and (
+                terrain != self.last[3] or self.last[1].startswith("interact:slot")):
+            self.memory.unlocked(node, self.last[1], exits_now - self.last[2])
+
     def step(self):
         """One decision. Returns False when there is nothing left to try."""
         if not self.settle():
@@ -733,8 +758,7 @@ class Agent:
             self.memory.current["pending"][node] = [
                 name for name in self.memory.current["pending"].get(node, []) if name not in ways_out]
         exits_now = {item.id for item in options if item.kind == "exit"}
-        if self.last and self.last[0] == node and exits_now - self.last[2]:
-            self.memory.unlocked(node, self.last[1], exits_now - self.last[2])
+        self.note_opening(node, exits_now, terrain)
         started = time.perf_counter()
         option, origin, details = self.decide(obs, node, options, hint)
         choice_seconds = time.perf_counter() - started
@@ -800,7 +824,7 @@ class Agent:
         self.undo = (before.getvalue(), node, option.id)
         self.memory.record(node, option.id)
         # Kept to notice, at the next survey, an option that makes new exits appear.
-        self.last = (node, option.id, exits_now) if option.kind != "exit" else None
+        self.last = (node, option.id, exits_now, terrain) if option.kind != "exit" else None
         run_route(self.pyboy, option.route, render=self.watch)
         controllable = self.settle()
         after = observe(self.pyboy)
@@ -808,6 +832,8 @@ class Agent:
         if self.pyboy.memory[HEALTH] == 0 or not controllable:
             # Retry from this agent's own state and never take this option here again.
             self.memory.banned.add((node, option.id))
+            details = {**details, "failure": "died" if self.pyboy.memory[HEALTH] == 0 else "no control",
+                       "mode": after.mode}
             self.pyboy.load_state(BytesIO(before.getvalue()))
             self.deaths += 1
             outcome = "failed, option dropped"
