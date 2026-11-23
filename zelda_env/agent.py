@@ -610,6 +610,13 @@ class Agent:
                 if done.get(room, 0) < TASK_REDOS:
                     done[room] = done.get(room, 0) + 1
                     fresh = [*fresh, *again]
+        if hint == "Go to a new room." and fresh:
+            # No exit here leads anywhere new. What can still be done in this room comes
+            # before walking back to a room already seen: the way on is opened from here.
+            onward = [option for option in fresh if option.kind == "exit" and option.destination not in seen]
+            local = [option for option in fresh if option.kind != "exit"]
+            if not onward and local:
+                fresh = local
         impasse = not fresh
         open_way = hint.startswith("Go ") and any(
             option.kind == "exit" and toward(option, hint[:-1]) for option in fresh)

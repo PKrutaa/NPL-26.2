@@ -441,3 +441,15 @@ def test_coming_back_to_a_dungeon_room_makes_its_pushes_new_a_limited_number_of_
         memory.record("04:20@0", push.id)
     memory.revisit("04:20@0")
     assert memory.fresh("04:20@0", [push, talk]) == []
+
+
+def test_what_can_be_done_in_the_room_comes_before_going_back_to_a_seen_room():
+    made = agent()
+    back, other = option("exit:B/10", "exit", "B"), option("exit:B/0", "exit", "B")
+    push = option("push:slot4@10:5:1:up", "push")
+    node = node_of("A", [back])
+    made.memory.current["visited"].append("B@0")
+    made.memory.arrive(node, [back, other, push])
+    made.memory.record(node, back.id)
+    chosen, origin, _ = made.decide(OBS, node, [back, other, push], "Go to a new room.")
+    assert chosen is push and origin == "forced"
