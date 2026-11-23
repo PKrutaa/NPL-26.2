@@ -111,6 +111,14 @@ Empurrar um bloco por vez não resolve as salas de blocos: um bloco empurrado pa
 
 A busca vale para salas de dungeon e interiores sem inimigos. Blocos que exigem o Power Bracelet só entram depois que Link tem o item.
 
+### Luta contra inimigo resistente
+
+A luta é simulada no emulador de cópia com várias formas de lutar, e fica a que custa menos vida. Quando nenhuma mata um inimigo, um golpe que tira vida dele já é uma opção, nomeada pela vida que resta aos inimigos, de modo que cada golpe seguinte é uma opção nova. Com um inimigo de muita vida na sala, os golpes miram nele e os pequenos ao redor ficam para depois. Uma luta pode custar até um coração, desde que Link termine vivo na simulação.
+
+Com inimigo na sala e nenhum golpe possível no momento, o agente espera e olha de novo. A regra de desfazer a decisão vale só para sala sem inimigo, onde ficar sem opção significa que Link ficou preso.
+
+Um coração ou uma fada no chão vira a opção de pegar o item: o levantamento percebe que a vida de Link sobe ao pisar ali. Itens no chão são pegos antes de qualquer outra coisa.
+
 ### Perguntas no diálogo
 
 O agente avança cenas e diálogos sozinho até Link voltar a ser controlável. Quando o jogo faz uma pergunta com opções, ele confirma a primeira. Se a mesma pergunta volta na mesma cena, confirma a seguinte, em rodízio. Isso resolve perguntas como "devo repetir?", em que a primeira resposta reinicia a explicação.

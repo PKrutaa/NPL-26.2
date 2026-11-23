@@ -287,7 +287,10 @@ A busca de empurrões também vale para a caverna do passado. O trecho `maku-tre
 | Queimar trepadeira com semente de brasa | Visto uma vez no trecho (`04:1d`), sem caso próprio |
 | Sequência de blocos de `04:19` | Funciona. O levantamento busca a ordem dos empurrões e a oferece como uma opção (caso `blocos-04-19`, 2 decisões). |
 | Sequência de blocos e botões de `04:16` | Não alcançada |
-| Botão de chão, plataforma móvel, mini-chefe, tochas, Power Bracelet, Wallmaster, chefe | Não alcançados |
+| Plataforma móvel de `04:15` | Atravessada no trecho, sem caso próprio |
+| Mini-chefe Giant Ghini | Funciona. Um golpe por decisão, mirado no mini-chefe, com a luta de menor custo de vida (caso `giant-ghini`: 6 decisões de luta, de 3 corações para 1,25). |
+| Coração ou fada no chão | Funciona. O levantamento percebe que a vida sobe ao pisar ali. |
+| Botões de `04:16`, tochas, Power Bracelet, vasos, chave do chefe, Wallmaster, chefe | Não alcançados |
 
 A lista completa de passos da dungeon está em [research-mecanicas-ages.md](research-mecanicas-ages.md).
 
