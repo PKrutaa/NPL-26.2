@@ -88,17 +88,53 @@ OBJECTIVES = (
      "Use the item on the obstacle or pick up the item.", _flag(TREASURES, 0x42)),
     ("dungeon-1", (("00:8d", "Enter the door or stairs."),), "Enter the door or stairs.",
      lambda pyboy: bool(pyboy.memory[GROUP4_ROOM_FLAGS + 0x24] & ROOM_VISITED)),
-    ("essencia-1", (), "Go to a new room.", lambda pyboy: bool(pyboy.memory[ESSENCES] & 1), 0x01),
+    # Dungeon 1, in the order the rooms have to be done: three small keys, the mini-boss,
+    # the torches that bring out the stairs to the Power Bracelet, the boss key, the boss.
+    ("essencia-1", (("04:1e", "Attack the enemy or pick up the item."),
+                    ("04:1a", "Use the item on the obstacle."),
+                    ("04:16", "Walk into the event or use the item on the obstacle."),
+                    ("04:18", "Attack the enemy."),
+                    ("04:1b", "Use the item on the obstacle."),
+                    ("04:10", "Pick up the item."),
+                    ("04:23", "Use the item on the obstacle."),
+                    ("04:13", "Attack the enemy."),
+                    ("04:11", "Walk into the event.")),
+     "Go to a new room.", lambda pyboy: bool(pyboy.memory[ESSENCES] & 1), 0x01),
     ("oito-essencias", (), "Go to a new room.", lambda pyboy: pyboy.memory[ESSENCES] == 0xFF),
 )
 
 
+def _grid(rows):
+    """Room -> (column, row) from a dungeon map drawn as rows of room numbers."""
+    return {f"04:{name}": (column, row) for row, line in enumerate(rows)
+            for column, name in enumerate(line.split()) if name != "."}
+
+
+# Dungeon rooms are not numbered by position. This is the map of dungeon 1, from
+# data/ages/dungeonLayouts.s of the pinned disassembly. Room 04:10 is a side room below 04:1b.
+DUNGEON_GRIDS = _grid((
+    "10 .  .  11 .",
+    ".  .  12 13 .",
+    ".  .  14 15 16",
+    ".  17 18 19 1a .",
+    ".  1b .  1c 1d 1e",
+    ".  1f .  .  20 21",
+    ".  22 23 24 25 .",
+))
+
+
 def heading(room, target):
-    """Compass words from one overworld screen to another. None across maps."""
+    """Compass words from one screen to another on the same map. None across maps."""
     if room[:2] != target[:2] or room == target:
         return None
-    here, there = int(room[3:], 16), int(target[3:], 16)
-    dy, dx = there // 16 - here // 16, there % 16 - here % 16
+    if room in DUNGEON_GRIDS and target in DUNGEON_GRIDS:
+        (x, y), (goal_x, goal_y) = DUNGEON_GRIDS[room], DUNGEON_GRIDS[target]
+        dy, dx = goal_y - y, goal_x - x
+    elif room[:2] not in OVERWORLD:
+        return None  # an interior with no map: the room numbers say nothing about position
+    else:
+        here, there = int(room[3:], 16), int(target[3:], 16)
+        dy, dx = there // 16 - here // 16, there % 16 - here % 16
     vertical = "north" if dy < 0 else "south" if dy > 0 else ""
     horizontal = "west" if dx < 0 else "east" if dx > 0 else ""
     # The longer leg first: the goal names one direction, and this is the order to try.
@@ -430,7 +466,10 @@ class Agent:
                     if task is None and not last:
                         state["step"] += 1  # a waypoint: nothing to do here
                         continue
-                    talked = (task and task.startswith(("Talk", "Use the item on the obstacle"))
+                    # Inside a dungeon every task of a room is done when the story moves on
+                    # there: the key is in the bag, the mini-boss is gone, the chest is open.
+                    talked = (task and (task.startswith(("Talk", "Use the item on the obstacle"))
+                                        or target[:2] not in OVERWORLD)
                               and state.get("epoch") not in (None, self.memory.epoch))
                     if talked and not last:
                         # The talk, or the item on the obstacle, moved the story on. Nothing

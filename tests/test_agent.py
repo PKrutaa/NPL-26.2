@@ -543,3 +543,25 @@ def test_the_supervisor_breaks_a_tie_that_laya_could_not_settle():
     made.memory.arrive(node, options)
     chosen, origin, _ = made.decide(OBS, node, options, "Go to a new room.")
     assert asked == [True] and chosen is options[1] and origin == "supervisor"
+
+
+def test_heading_inside_dungeon_1_follows_its_map_not_the_room_numbers():
+    from zelda_env.agent import heading
+
+    assert heading("04:24", "04:1e") == "north or east"
+    assert heading("04:1a", "04:16") == "north"
+    assert heading("04:19", "04:16") == "north or east"
+    assert heading("04:18", "04:1b") == "south or west"
+    assert heading("05:ed", "05:ec") is None  # an interior with no map
+
+
+def test_a_dungeon_step_ends_when_the_story_moves_on_in_its_room(monkeypatch):
+    import zelda_env.agent as module
+
+    steps = (("04:1e", "Attack the enemy or pick up the item."), ("04:1a", "Use the item on the obstacle."))
+    monkeypatch.setattr(module, "OBJECTIVES", (("essencia", steps, "Go to a new room.", lambda pyboy: False),))
+    made = agent()
+    assert made.objective("04:21") == ("essencia", "Go north.")
+    assert made.objective("04:1e") == ("essencia", "Attack the enemy or pick up the item.")
+    made.memory.enter(b"small key in the bag")
+    assert made.objective("04:1e") == ("essencia", "Go north or west.")
