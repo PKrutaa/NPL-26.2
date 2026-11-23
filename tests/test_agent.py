@@ -195,8 +195,10 @@ def test_a_known_exit_toward_the_goal_is_offered_again_a_limited_number_of_times
         chosen, origin, _ = made.decide(OBS, node, options, "Go outside.")
         assert (chosen.id, origin) == ("exit:01:76", "laya")
     made.policy.choose = lambda context, criteria: (offered.append(set(criteria.values())) or sorted(criteria)[0], {})
-    made.decide(OBS, node, options, "Go outside.")
-    assert "Go outside" in offered[0] and "Go outside" in offered[1] and "Go outside" not in offered[2]
+    chosen, origin, _ = made.decide(OBS, node, options, "Go outside.")
+    assert "Go outside" in offered[0] and "Go outside" in offered[1]
+    # After that the door is no longer put to Laya as a choice: the known map leads out.
+    assert len(offered) == 2 and origin == "route"
 
 
 def test_the_dungeon_of_the_objective_is_entered_at_once_and_not_left():
