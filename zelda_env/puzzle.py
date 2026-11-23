@@ -22,6 +22,7 @@ BLOCKS = {
     0x10: (ANY, 0x10, True), 0x11: (ANY, 0x10, True), 0x12: (ANY, 0x10, True), 0x13: (ANY, 0x10, True),
 }
 BUTTON, CHEST = 0x0C, 0xF1  # floor button; closed chest
+WALKABLE = (0x00, 0x18)  # collision bytes Link can walk over: open floor and stairs
 MAX_STATES = 4000
 
 
@@ -50,7 +51,7 @@ def solve(layout, collisions, start, width, height, *, bracelet=False, targets=N
     """
     movable = {cell: BLOCKS[tile] for cell, tile in layout.items()
                if tile in BLOCKS and (bracelet or not BLOCKS[tile][2])}
-    walls = {cell for cell, value in collisions.items() if value and cell not in movable}
+    walls = {cell for cell, value in collisions.items() if value not in WALKABLE and cell not in movable}
     if not movable:
         return []
     if targets is None:

@@ -701,7 +701,7 @@ class Surveyor:
             route, good = [], True
             for block, direction in pushed:
                 layout, solid = grid()
-                walls = {place for place, value in solid.items() if value}
+                walls = {place for place, value in solid.items() if value not in puzzle.WALKABLE}
                 dx, dy = puzzle.STEP[direction]
                 path = puzzle.walk(walls, (), cell(), (block[0] - dx, block[1] - dy), width, height)
                 good = path is not None and self._walk_cells(path, route) and self._push_block(
@@ -715,7 +715,9 @@ class Surveyor:
 
     def _walk_cells(self, path, route):
         """Walk Link through the middle of each cell of `path`, recording the inputs."""
-        for target in path[1:]:
+        # Link is lined up with the middle of the last cell even when he is already in it:
+        # a block only moves when he pushes it squarely.
+        for target in [*path[1:-1], path[-1]]:
             goal = (target[0] * 16 + 8, target[1] * 16 + 8)
             for _ in range(40):
                 seen = observe(self.shadow)
