@@ -41,6 +41,7 @@ LONG_WINDOW, LONG_REPEATS = 80, 6  # one move made this many times within that m
 LOOP_WINDOW, LOOP_MOVES = 12, 4  # that many decisions made of at most this many distinct moves
 RECIPE_STEPS = 12
 SWEEP_LIMIT = 80  # sweep decisions without story progress before declaring an impasse
+FIGHT_PATIENCE = 60  # looks in a row with an enemy in the room and no blow that lands
 SNAPSHOT_EVERY = 10  # decisions between the snapshots a run keeps on disk
 FAILURE_LOOKBACK = 6  # snapshots kept, one every five decisions
 MAX_HOPS = 14  # consecutive trips to a pending area with nothing new found
@@ -866,6 +867,13 @@ class Agent:
             # Usually a scene that started between two checks. Let it play, then look again.
             self.empty += 1
             self.write({"event": "no_options", "room": obs.room, "xy": [obs.x, obs.y], "streak": self.empty})
+            # With an enemy in the room, nothing to do right now only means that no blow
+            # lands from here at this moment. The fight goes on: wait a little and look again.
+            fighting = bool(enemies(self.pyboy))
+            if fighting:
+                for _ in range(3):
+                    execute(self.pyboy, "wait", render=self.watch)
+                return self.empty <= FIGHT_PATIENCE
             if self.empty >= 3 and self.undo:
                 # Link is shut in (a block pushed the wrong way). Go back to before the
                 # decision that did it, and never offer that decision there again.

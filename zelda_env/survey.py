@@ -348,7 +348,7 @@ class Surveyor:
                 for max_loss in (0, HEART, 2 * HEART):
                     if max_loss >= health:
                         break
-                    hit = self.fight(root, sword, max_loss=max_loss, wound=True,
+                    hit = self.fight(root, sword, max_loss=max_loss, wound=True, steps=320 if tough else 160,
                                      target=tough["slot"] if tough else None)
                     if hit:
                         nearest = max(foes, key=lambda item: item["health"])
