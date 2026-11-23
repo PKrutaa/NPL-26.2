@@ -200,7 +200,10 @@ class Surveyor:
         The copy starts from the exact state of the game, so a fight that works here
         replays the same way in the main emulator.
         """
+        best = None
         for hold, reach, retreat, style, side_sign in TACTICS:
+            if best is not None and best[1] == 0:
+                break  # nothing beats a fight that costs no health
             self._load(state)
             start = observe(self.shadow)
             count, health = len(enemies(self.shadow)), self.shadow.memory[HEALTH]
@@ -211,12 +214,15 @@ class Surveyor:
                 foes = enemies(self.shadow)
                 if obs.mode != "playing" or obs.room != start.room:
                     break  # leaving the room also empties the enemy list; that is not a win
-                if len(foes) < count:
-                    return tuple(route), health - self.shadow.memory[HEALTH]
                 now = {foe["slot"]: foe["health"] for foe in foes}
                 aimed = before if target is None else {target: before.get(target, 0)}
-                if wound and any(now.get(slot, 0) < points for slot, points in aimed.items()):
-                    return tuple(route), health - self.shadow.memory[HEALTH]
+                if len(foes) < count or (
+                        wound and any(now.get(slot, 0) < points for slot, points in aimed.items())):
+                    # Every way of fighting is tried, and the one that costs least is kept.
+                    result = (tuple(route), health - self.shadow.memory[HEALTH])
+                    if best is None or (result[1], len(result[0])) < (best[1], len(best[0])):
+                        best = result
+                    break
                 if self.shadow.memory[HEALTH] < health - max_loss:
                     break
                 foe = next((item for item in foes if item["slot"] == target), None) or min(
@@ -250,7 +256,7 @@ class Surveyor:
                 previous = (obs.x, obs.y, "move" if moving else "act")
                 route.append(step)
                 execute(self.shadow, step[0], hold_frames=step[1])
-        return None
+        return best
 
     def options(self, pyboy, *, grid=8, limit=700, tolerance=0, stride=12, pushes=True):
         """Flood the room with short moves. Return one Option per distinct outcome."""
@@ -343,9 +349,9 @@ class Surveyor:
             if not won:
                 # No kill within reach. One blow that lands is still progress, named by the
                 # health the enemies have left, so each further blow is a new option.
-                # A replayed fight costs exactly what it cost here, so any loss that leaves
-                # Link alive can be accepted when nothing gentler lands a blow.
-                for max_loss in (0, HEART, 2 * HEART):
+                # A replayed fight costs exactly what it cost here, so a loss of up to one
+                # heart that leaves Link alive can be accepted when nothing gentler lands a blow.
+                for max_loss in (0, HEART):
                     if max_loss >= health:
                         break
                     hit = self.fight(root, sword, max_loss=max_loss, wound=True, steps=320 if tough else 160,
