@@ -734,10 +734,19 @@ class Agent:
         one changes the terrain, or comes from a talk.
         """
         self.just_opened = set()
-        if self.last and self.last[0] == node and exits_now - self.last[2] and (
-                terrain != self.last[3] or self.last[1].startswith("interact:slot")):
-            self.memory.unlocked(node, self.last[1], exits_now - self.last[2])
-            self.just_opened = exits_now - self.last[2]
+        if not self.last or self.last[0] != node:
+            return
+
+        def room_of(exit_id):
+            return exit_id[len("exit:"):].split("/")[0]
+
+        # Another gap to a room that already had an exit is not a way that opened: it
+        # shows up when an object moves out of the corridor.
+        reachable = {room_of(name) for name in self.last[2]}
+        new = {name for name in exits_now - self.last[2] if room_of(name) not in reachable}
+        if new and (terrain != self.last[3] or self.last[1].startswith("interact:slot")):
+            self.memory.unlocked(node, self.last[1], new)
+            self.just_opened = new
 
     def step(self):
         """One decision. Returns False when there is nothing left to try."""

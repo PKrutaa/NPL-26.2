@@ -409,6 +409,7 @@ def test_a_second_gap_to_a_room_already_seen_is_not_taken_as_a_gate():
     made.last = (node, "push:slot4@10:7:1:up", {back.id}, b"cube in the corridor")
     made.note_opening(node, {back.id, other.id}, b"cube moved")
     made.memory.arrive(node, [push, back, other])
+    assert made.memory.opened == {}  # and the push is not remembered as what opened it
     chosen, origin, _ = made.decide(OBS, node, [push, back, other], "Go to a new room.")
     assert origin != "route"
 
