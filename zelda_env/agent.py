@@ -215,6 +215,11 @@ class Memory:
             # open a way nobody is taking.
             return bool(ways) and not set(ways) <= offered and self.tries(node, option.id) <= REOPENS
 
+        # An object whose push opened ways that are open right now is where it belongs.
+        # Pushing it again would only close them.
+        settled = {key.split("|", 1)[1].split("@")[0] for key, ways in self.opened.items()
+                   if key.startswith(f"{node}|push:slot") and set(ways) <= offered}
+        options = [option for option in options if option.id.split("@")[0] not in settled]
         return [option for option in options
                 if (node, option.id) not in self.banned and (reopens(option) or (
                     not self.tries(node, option.id) and not chatty(option)
@@ -550,6 +555,11 @@ class Agent:
         known = self.memory.edges.get(room, {})
         ways = [option for option in usable if option.kind == "exit" and option not in fresh
                 and reused.get(f"{room}|{option.id}", 0) < GOAL_REUSES and known.get(option.id) not in spent]
+        # Something lying on the ground is picked up before anything else: a key that an
+        # enemy dropped is gone if Link leaves the room.
+        loot = next((option for option in fresh if option.id.startswith("collect:")), None)
+        if loot:
+            return loot, "forced", {}
         # A way that the last action opened is taken before any known path: a gate that
         # was just unlocked is the way forward, even when the map knows another one.
         opened = getattr(self, "just_opened", ())

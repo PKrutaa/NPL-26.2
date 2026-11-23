@@ -453,3 +453,21 @@ def test_what_can_be_done_in_the_room_comes_before_going_back_to_a_seen_room():
     made.memory.record(node, back.id)
     chosen, origin, _ = made.decide(OBS, node, [back, other, push], "Go to a new room.")
     assert chosen is push and origin == "forced"
+
+
+def test_an_item_on_the_ground_is_picked_up_before_leaving():
+    made = agent()
+    key, door = option("collect:eb1589", "trigger"), option("exit:B", "exit", "B")
+    node = node_of("A", [door])
+    made.memory.arrive(node, [key, door])
+    chosen, origin, _ = made.decide(OBS, node, [key, door], "Go to a new room.")
+    assert chosen is key and origin == "forced"
+
+
+def test_an_object_whose_push_opened_the_doors_is_not_pushed_again():
+    memory = Memory()
+    door = Option("exit:04:21/3", "exit", "east", (), "04:21", "Go east")
+    more = [option("push:slot4@10:4:130:left", "push"), option("push:slot4@10:4:130:down", "push")]
+    memory.unlocked("04:20@0", "push:slot4@10:5:1:up", {door.id})
+    assert memory.fresh("04:20@0", [door, *more]) == [door]
+    assert memory.fresh("04:20@0", more) == more  # the doors are shut again: the cube is back at the start
