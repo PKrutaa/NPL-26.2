@@ -568,8 +568,9 @@ class Agent:
         ways = [option for option in usable if option.kind == "exit" and option not in fresh
                 and reused.get(f"{room}|{option.id}", 0) < GOAL_REUSES and known.get(option.id) not in spent]
         # Something lying on the ground is picked up before anything else: a key that an
-        # enemy dropped is gone if Link leaves the room.
-        loot = next((option for option in fresh if option.id.startswith("collect:")), None)
+        # enemy dropped is gone if Link leaves the room. A floor button is pressed the same
+        # way: it is what opens the door or brings out the chest.
+        loot = next((option for option in fresh if option.id.startswith(("collect:", "trigger:floor:"))), None)
         if loot:
             return loot, "forced", {}
         def loose_push(option):

@@ -381,10 +381,21 @@ class Surveyor:
                 # Every probe is judged against the moment right before it, not against the
                 # start of the survey: a door that shuts behind Link is not an effect of a probe.
                 before_step = progress(self.shadow)
+                layout_before = room_layout(self.shadow)
                 after, event, _ = execute(self.shadow, direction, hold_frames=stride)
                 responded |= event != "blocked" or after.mode != "playing"
                 base_progress, base_layout = progress(self.shadow), room_layout(self.shadow)
                 step = (*route, (direction, stride))
+                if (not self.volatile and event == "moved" and after.mode == "playing" and after.room == start.room
+                        and base_layout != layout_before):
+                    # Walking here changed the room: a floor button. Named by what changed, so
+                    # two buttons that do different things are two options.
+                    change = next((f"{old:02x}{new:02x}@{index:02x}" for index, (old, new)
+                                   in enumerate(zip(layout_before, base_layout)) if old != new), "")
+                    if f"trigger:floor:{change}" not in found:
+                        add(f"trigger:floor:{change}", "trigger",
+                            f"Step on the floor switch {bearing(start, after.x, after.y)}", step,
+                            short="Walk into the event")
                 if self.shadow.memory[HEALTH] > health and after.room == start.room and "collect:heart" not in found:
                     # Link's health went up on this step: a heart or a fairy was lying here.
                     add("collect:heart", "trigger", f"Pick up the heart {bearing(start, after.x, after.y)}",
