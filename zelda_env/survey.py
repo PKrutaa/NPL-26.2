@@ -27,6 +27,7 @@ ESSENCES = 0xC6BF
 TEXT_INDEX = 0xCBA2
 COLLISIONS = 0xCE00  # same 16-byte row stride as the layout
 INVENTORY_B, INVENTORY_A = 0xC688, 0xC689
+MOVED_PIXELS = 6  # how far an object has to go to count as moved by a push
 CUBE_COLOR, CUBE_POSITION = 0xCCAD, 0xCCAE  # the rolling cube of the dungeons
 ITEM_COUNTS = slice(0xC6B0, 0xC6C0)  # bombs and the five kinds of seed, among others
 STORAGE = 0xC68A  # sixteen item slots shown in the menu
@@ -112,8 +113,10 @@ class Surveyor:
         return self.shadow.memory[TEXT_INDEX] | self.shadow.memory[TEXT_INDEX + 1] << 8
 
     def _effect(self, entity, after, base_progress, base_layout):
+        # A few pixels are not a push: the eye of a statue shifts as it follows Link.
         moved = entity and not any(
-            item["slot"] == entity["slot"] and (item["x"], item["y"]) == (entity["x"], entity["y"])
+            item["slot"] == entity["slot"]
+            and abs(item["x"] - entity["x"]) + abs(item["y"] - entity["y"]) < MOVED_PIXELS
             for item in after.entities)
         return bool(moved) or self._changed(base_progress, base_layout, "playing")
 
