@@ -100,6 +100,17 @@ A sala de referência de uma etapa pode ter partes que não se ligam, e a tarefa
 
 Quando uma ação faz surgir uma saída, o agente guarda a ação como o que abre aquela saída e a refaz quando a saída está fechada. A saída recém-aberta é tomada na decisão seguinte, antes de qualquer rota conhecida. Refazer a ação para reabrir a saída tem limite de duas vezes por estado da história. Só conta como abertura a saída que surge com mudança de terreno ou depois de uma conversa. Uma saída que apareceu porque o levantamento seguinte foi mais detalhado não é atribuída à ação.
 
+### Sequência de empurrões
+
+Empurrar um bloco por vez não resolve as salas de blocos: um bloco empurrado para o lado errado fica lá até Link sair, e a sala volta ao início. O levantamento busca a ordem dos empurrões em `zelda_env/puzzle.py`.
+
+- A busca roda na grade de blocos da sala, sem emulação. As regras de cada bloco (direção em que anda e no que ele vira) vêm das tabelas `interactableTiles.s` e `pushableTiles.s` do disassembly.
+- O alvo é um lugar que Link não alcançava: uma saída na borda da sala, um botão de chão ou a frente de um baú.
+- O levantamento refaz a solução no emulador de simulação, andando até cada bloco, e só a oferece se todos os blocos se moveram e Link não se feriu.
+- A solução é uma opção só. O agente a executa sem consultar o Laya, e os empurrões avulsos de bloco deixam de ser oferecidos na sala.
+
+A busca vale para salas de dungeon e interiores sem inimigos. Blocos que exigem o Power Bracelet só entram depois que Link tem o item.
+
 ### Perguntas no diálogo
 
 O agente avança cenas e diálogos sozinho até Link voltar a ser controlável. Quando o jogo faz uma pergunta com opções, ele confirma a primeira. Se a mesma pergunta volta na mesma cena, confirma a seguinte, em rodízio. Isso resolve perguntas como "devo repetir?", em que a primeira resposta reinicia a explicação.

@@ -273,7 +273,9 @@ O que impedia o trecho da chave, na ordem em que apareceu:
 
 ### Dentro da dungeon 1
 
-O trecho `essencia-1` ainda não passa. O caso `chave-pequena` passa: a partir da sala antes do cubo colorido, o agente resolve o cubo, derrota o Ghini, pega a chave pequena e abre a porta trancada de `04:1d`, em 12 decisões e sem corte de ciclo.
+O trecho `essencia-1` ainda não passa.
+
+A busca de empurrões também vale para a caverna do passado. O trecho `maku-tree-salva` caiu de 122 decisões (execução 10) para 88, sem corte de ciclo, e o caso `blocos-maku-path` resolve o labirinto de blocos de `04:09` em 2 decisões. O caso `chave-pequena` passa: a partir da sala antes do cubo colorido, o agente resolve o cubo, derrota o Ghini, pega a chave pequena e abre a porta trancada de `04:1d`, em 12 decisões e sem corte de ciclo.
 
 | Mecânica da dungeon 1 | Estado |
 | --- | --- |
@@ -283,7 +285,8 @@ O trecho `essencia-1` ainda não passa. O caso `chave-pequena` passa: a partir d
 | Porta trancada com chave pequena | Funciona. Andar contra a porta já é uma opção do levantamento. |
 | Baú | Visto uma vez no trecho (`04:1a`), sem caso próprio |
 | Queimar trepadeira com semente de brasa | Visto uma vez no trecho (`04:1d`), sem caso próprio |
-| Sequência de blocos de `04:19` e `04:16` | Não resolve. O agente tenta empurrões ao acaso e a sala volta ao início quando ele sai. |
+| Sequência de blocos de `04:19` | Funciona. O levantamento busca a ordem dos empurrões e a oferece como uma opção (caso `blocos-04-19`, 2 decisões). |
+| Sequência de blocos e botões de `04:16` | Não alcançada |
 | Botão de chão, plataforma móvel, mini-chefe, tochas, Power Bracelet, Wallmaster, chefe | Não alcançados |
 
 A lista completa de passos da dungeon está em [research-mecanicas-ages.md](research-mecanicas-ages.md).
