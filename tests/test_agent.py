@@ -508,3 +508,13 @@ def test_after_the_push_sequence_no_other_block_is_pushed_on_that_visit():
     made.done_here = ["solve:37098294"]
     chosen, _, _ = made.decide(OBS, node, [push, door], "Go to a new room.")
     assert chosen is door
+
+
+def test_an_exit_never_taken_comes_before_one_that_only_looks_new_after_progress():
+    made = agent()
+    north, east = option("exit:B/10", "exit", "B"), option("exit:C/2", "exit", "C")
+    node = node_of("A", [north, east])
+    made.memory.arrive(node, [north, east])
+    made.memory.edges[node] = {north.id: "B@0"}  # taken in an earlier story state
+    chosen, origin, _ = made.decide(OBS, node, [north, east], "Go to a new room.")
+    assert chosen is east and origin == "forced"

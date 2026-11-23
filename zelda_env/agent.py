@@ -649,6 +649,11 @@ class Agent:
                     done[room] = done.get(room, 0) + 1
                     fresh = [*fresh, *again]
         if hint == "Go to a new room." and fresh:
+            # An exit never taken in any story state comes before the ones that only look
+            # new because the story moved on.
+            untaken = [option for option in fresh if option.kind == "exit" and option.id not in taken]
+            if untaken:
+                fresh = [option for option in fresh if option.kind != "exit" or option in untaken]
             # No exit here leads anywhere new. What can still be done in this room comes
             # before walking back to a room already seen: the way on is opened from here.
             onward = [option for option in fresh if option.kind == "exit" and (
