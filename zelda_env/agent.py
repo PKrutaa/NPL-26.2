@@ -823,6 +823,15 @@ class Agent:
         # Record the arrival first: it marks the way back as known, and the decision to
         # look deeper must not count that exit as something new.
         came_from = self.arrival[0]
+        if not getattr(self, "started", False):
+            self.started = True
+            if self.decisions:
+                # A session resumed from a saved point does not know how Link came into
+                # this room. The exit he is standing in is the way back, not a new way.
+                for item in options:
+                    if item.kind == "exit" and len(item.route) <= 1:
+                        self.memory.edges.setdefault(node, {}).setdefault(item.id, f"{item.destination}@0")
+                        self.memory.current["tried"].setdefault(f"{node}|{item.id}", 1)
         self.memory.arrive(node, options, *self.arrival)
         self.arrival = (None, None)
         back_in_dungeon = (came_from and came_from != node and getattr(self, "focus", None) is not None
