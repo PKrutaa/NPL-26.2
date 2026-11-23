@@ -233,9 +233,11 @@ class Memory:
             ways_back = sorted((option for option in options
                                 if option.kind == "exit" and option.destination == origin.split("@")[0]),
                                key=lambda option: len(option.route))
-            if origin != node and node not in self.current["visited"] and ways_back:
+            if origin != node and ways_back:
                 # Screen edges normally work both ways. Do not spend a decision confirming it.
                 # With more than one gap back to that room, the nearest is the one Link used.
+                # The way back is known even when this part of the room was reached before
+                # through another gap: it is not somewhere new.
                 back = ways_back[0].id
                 self.edges.setdefault(node, {}).setdefault(back, origin)
                 self.current["tried"].setdefault(f"{node}|{back}", 1)
