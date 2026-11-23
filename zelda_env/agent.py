@@ -800,7 +800,7 @@ class Agent:
         dead_end = dead_end or bool(back_in_dungeon)
         # So does a room where Link has just pushed something: what moved can be pushed
         # again from where it is now, and that is how a block reaches its place.
-        dead_end = dead_end or bool(self.last and self.last[0] == node and self.last[1].startswith("push:"))
+        dead_end = dead_end or bool(self.last and self.last[0] == node and self.last[1].startswith(("push:", "solve:")))
         while level < len(SURVEY_LEVELS) - 1 and (dead_end or not self.memory.fresh(node, options)):
             found = {option.id for option in options}
             owed = [item for item in self.memory.current["pending"].get(node, []) if item not in found]
