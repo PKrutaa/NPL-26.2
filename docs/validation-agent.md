@@ -271,6 +271,23 @@ O que impedia o trecho da chave, na ordem em que apareceu:
 | Com o objetivo em duas direções, o agente nomeava a primeira que tivesse qualquer saída, mesmo já usada. | A direção com saída ainda não usada vem primeiro. |
 | Um arbusto que volta a crescer era cortado a cada visita para reabrir um caminho que ninguém ia usar. | Limite de duas repetições por estado da história. |
 
+### Dentro da dungeon 1
+
+O trecho `essencia-1` ainda não passa. O caso `chave-pequena` passa: a partir da sala antes do cubo colorido, o agente resolve o cubo, derrota o Ghini, pega a chave pequena e abre a porta trancada de `04:1d`, em 12 decisões e sem corte de ciclo.
+
+| Mecânica da dungeon 1 | Estado |
+| --- | --- |
+| Derrotar todos os inimigos para abrir a porta | Funciona |
+| Cubo colorido até o encaixe | Funciona |
+| Pegar a chave pequena que cai | Funciona. Um item no chão é pego antes de qualquer outra coisa. |
+| Porta trancada com chave pequena | Funciona. Andar contra a porta já é uma opção do levantamento. |
+| Baú | Visto uma vez no trecho (`04:1a`), sem caso próprio |
+| Queimar trepadeira com semente de brasa | Visto uma vez no trecho (`04:1d`), sem caso próprio |
+| Sequência de blocos de `04:19` e `04:16` | Não resolve. O agente tenta empurrões ao acaso e a sala volta ao início quando ele sai. |
+| Botão de chão, plataforma móvel, mini-chefe, tochas, Power Bracelet, Wallmaster, chefe | Não alcançados |
+
+A lista completa de passos da dungeon está em [research-mecanicas-ages.md](research-mecanicas-ages.md).
+
 ## Testes por trecho e por caso
 
 Uma execução desde o boot leva cerca de uma hora até os objetivos mais distantes. Para iterar mais rápido, o agente salva o estado do jogo e a própria memória em dois momentos, e `zelda_env/segments.py` roda a partir desses pontos.
