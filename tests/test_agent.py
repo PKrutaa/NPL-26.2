@@ -133,6 +133,7 @@ def test_laya_reads_only_the_short_goal_and_short_options():
     assert set(made.policy.asked[0].values()) == {"Go north to a new room", "Talk to the character"}
     # Once the room on the other side is known, the exit stops saying it is new.
     made.memory.arrive(node_of("B", []), [])
+    made.memory.edges[node] = {options[0].id: "B@0"}  # and the exit itself has been taken
     made.decide(OBS, node, options, "Go north.")
     assert set(made.policy.asked[1].values()) == {"Go north", "Talk to the character"}
 
@@ -185,6 +186,7 @@ def test_a_known_exit_toward_the_goal_is_offered_again_a_limited_number_of_times
     node = node_of("04:e7", options)
     made.memory.arrive(node, options)
     made.memory.record(node, "exit:01:76")  # Link came in through it, so it is not new
+    made.memory.edges[node] = {"exit:01:76": "01:76@0"}
     made.memory.arrive(node_of("01:76", []), [])
     offered = []
     made.policy.choose = lambda context, criteria: (
@@ -452,6 +454,8 @@ def test_what_can_be_done_in_the_room_comes_before_going_back_to_a_seen_room():
     made.memory.current["visited"].append("B@0")
     made.memory.arrive(node, [back, other, push])
     made.memory.record(node, back.id)
+    # The second gap was tried once before and led to the same part of that room.
+    made.memory.edges[node] = {back.id: "B@0", other.id: "B@0"}
     chosen, origin, _ = made.decide(OBS, node, [back, other, push], "Go to a new room.")
     assert chosen is push and origin == "forced"
 

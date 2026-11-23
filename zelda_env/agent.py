@@ -539,7 +539,10 @@ class Agent:
                 # With an open exit toward the goal, the side an obstacle is on is noise.
                 text = text.split(" to the ")[0]
             # An exit to a room not seen in this story state says so: goals can ask for it.
-            fresh_room = option.kind == "exit" and option.destination not in seen
+            # So does an exit that was never taken, even to a room Link knows: it can lead
+            # to a part of that room that the other way in does not reach.
+            fresh_room = option.kind == "exit" and (
+                option.destination not in seen or option.id not in self.memory.edges.get(room, {}))
             return f"{text} to a new room" if fresh_room and text.startswith("Go ") else text
 
         def toward(option, goal):
@@ -645,7 +648,8 @@ class Agent:
         if hint == "Go to a new room." and fresh:
             # No exit here leads anywhere new. What can still be done in this room comes
             # before walking back to a room already seen: the way on is opened from here.
-            onward = [option for option in fresh if option.kind == "exit" and option.destination not in seen]
+            onward = [option for option in fresh if option.kind == "exit" and (
+                option.destination not in seen or option.id not in self.memory.edges.get(room, {}))]
             local = [option for option in fresh if option.kind != "exit" and not loose_push(option)]
             if not onward and local:
                 fresh = local
