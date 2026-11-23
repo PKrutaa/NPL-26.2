@@ -51,7 +51,7 @@ def font(size, mono=False):
     return ImageFont.load_default()
 
 
-TITLE, TEXT, SMALL, MONO = font(26), font(19), font(15), font(16, mono=True)
+TITLE, TEXT, SMALL, MONO = font(23), font(18), font(15), font(15, mono=True)
 
 
 class Recorder:
@@ -91,8 +91,10 @@ class Recorder:
         canvas.paste(game, GAME_AT)
         draw = ImageDraw.Draw(canvas)
         y = 30
-        draw.text((PANEL_X, y), self.panel["title"], font=TITLE, fill=INK)
-        y += 44
+        for part in wrap(draw, self.panel["title"], TITLE, WIDTH - PANEL_X - 20):
+            draw.text((PANEL_X, y), part, font=TITLE, fill=INK)
+            y += TITLE.size + 6
+        y += 10
         for kind, text in self.panel["lines"]:
             color = {"dim": DIM, "accent": ACCENT, "chosen": CHOSEN}.get(kind, INK)
             used = MONO if kind in ("option", "chosen") else SMALL if kind == "dim" else TEXT
