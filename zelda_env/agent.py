@@ -562,10 +562,23 @@ class Agent:
         loot = next((option for option in fresh if option.id.startswith("collect:")), None)
         if loot:
             return loot, "forced", {}
+        def loose_push(option):
+            return option.id.startswith("push:") and not option.id.startswith("push:slot")
+
+        # In a dungeon the enemies come first: the search for a push sequence only runs in
+        # a room without them, and a block pushed at random before that can shut the way.
+        inside = self.pyboy.memory[DUNGEON_INDEX] != 0xFF
+        foe = next((option for option in fresh if option.kind == "fight"), None)
+        if inside and foe and any(loose_push(option) for option in fresh):
+            return foe, "forced", {}
         # A push sequence that the survey worked out and checked is not a guess: do it.
         plan = next((option for option in fresh if option.id.startswith("solve:")), None)
         if plan:
             return plan, "forced", {}
+        if any(name.startswith("solve:") for name in getattr(self, "done_here", ())):
+            # The sequence was done on this visit. One more block pushed would undo it.
+            fresh = [option for option in fresh if not loose_push(option)]
+            usable = [option for option in usable if not loose_push(option)]
         # A way that the last action opened is taken before any known path: a gate that
         # was just unlocked is the way forward, even when the map knows another one.
         opened = getattr(self, "just_opened", ())
@@ -630,7 +643,7 @@ class Agent:
             # No exit here leads anywhere new. What can still be done in this room comes
             # before walking back to a room already seen: the way on is opened from here.
             onward = [option for option in fresh if option.kind == "exit" and option.destination not in seen]
-            local = [option for option in fresh if option.kind != "exit"]
+            local = [option for option in fresh if option.kind != "exit" and not loose_push(option)]
             if not onward and local:
                 fresh = local
         impasse = not fresh

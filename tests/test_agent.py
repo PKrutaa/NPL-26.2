@@ -481,3 +481,23 @@ def test_a_checked_push_sequence_is_done_without_asking():
     made.memory.arrive(node, [plan, door])
     chosen, origin, _ = made.decide(OBS, node, [plan, door], "Go to a new room.")
     assert chosen is plan and origin == "forced"
+
+
+def test_in_a_dungeon_the_enemy_is_fought_before_a_block_is_pushed():
+    made = agent()
+    made.pyboy.memory[0xCC39] = 1
+    fight, push = option("fight:2:32", "fight"), option("push:6:5:left", "push")
+    node = node_of("04:19", [])
+    made.memory.arrive(node, [push, fight])
+    chosen, origin, _ = made.decide(OBS, node, [push, fight], "Go to a new room.")
+    assert chosen is fight and origin == "forced"
+
+
+def test_after_the_push_sequence_no_other_block_is_pushed_on_that_visit():
+    made = agent()
+    push, door = option("push:8:9:left", "push"), option("exit:04:15/10", "exit", "04:15")
+    node = node_of("04:19", [door])
+    made.memory.arrive(node, [push, door])
+    made.done_here = ["solve:37098294"]
+    chosen, _, _ = made.decide(OBS, node, [push, door], "Go to a new room.")
+    assert chosen is door
