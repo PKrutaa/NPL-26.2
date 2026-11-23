@@ -21,7 +21,7 @@ BLOCKS = {
     0x25: (ANY, 0x25, False), 0x07: (ANY, 0x06, False),
     0x10: (ANY, 0x10, True), 0x11: (ANY, 0x10, True), 0x12: (ANY, 0x10, True), 0x13: (ANY, 0x10, True),
 }
-FLOOR_UNDER = 0xA0  # what a pushed block leaves behind in these rooms
+BUTTON, CHEST = 0x0C, 0xF1  # floor button; closed chest
 MAX_STATES = 4000
 
 
@@ -44,7 +44,7 @@ def solve(layout, collisions, start, width, height, *, bracelet=False, targets=N
 
     `layout` and `collisions` map (x, y) to the tile and to its collision byte. `targets`
     is the set of cells worth reaching; by default, the walkable cells on the edge of the
-    room. Returns up to `limit` solutions, one per newly reached target, as lists of
+    room, floor buttons and the cells next to a chest. Returns up to `limit` solutions, one per newly reached target, as lists of
     ((x, y) of the block, direction). The start state counts every block as pushable
     again, so the caller must pass a room that has not been disturbed.
     """
@@ -54,8 +54,12 @@ def solve(layout, collisions, start, width, height, *, bracelet=False, targets=N
     if not movable:
         return []
     if targets is None:
-        targets = {cell for cell in layout if cell not in walls and cell not in movable
-                   and (cell[0] in (0, width - 1) or cell[1] in (0, height - 1))}
+        open_cells = {cell for cell in layout if cell not in walls and cell not in movable}
+        targets = {cell for cell in open_cells if cell[0] in (0, width - 1) or cell[1] in (0, height - 1)}
+        # A floor button opens doors when stepped on, and a chest is opened from next to it.
+        targets |= {cell for cell in open_cells if layout[cell] == BUTTON}
+        targets |= {(x + dx, y + dy) for (x, y), tile in layout.items() if tile == CHEST
+                    for dx, dy in STEP.values()} & open_cells
     first = frozenset((cell, layout[cell]) for cell in movable)
     fixed_start = frozenset()
     base = reachable(walls, {cell for cell, _ in first} | fixed_start, start, width, height)

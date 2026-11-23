@@ -63,3 +63,22 @@ def test_walk_goes_around_a_block():
     walls = {cell for cell, value in collisions.items() if value and layout[cell] != 0x1C}
     path = puzzle.walk(walls, {(1, 1)}, start, (1, 0), width, height)
     assert path[0] == start and path[-1] == (1, 0) and (1, 1) not in path
+
+
+def test_a_floor_button_behind_a_block_is_a_place_worth_reaching():
+    layout, collisions, start, width, height = room([
+        "#######",
+        "#.#...#",
+        "#.o.L.#",
+        "#######",
+    ])
+    layout[(1, 1)] = puzzle.BUTTON
+    assert puzzle.solve(layout, collisions, start, width, height) == []  # the block cannot leave the corridor
+    layout, collisions, start, width, height = room([
+        "#######",
+        "#..#..#",
+        "#.o.L.#",
+        "#######",
+    ])
+    layout[(1, 1)] = puzzle.BUTTON
+    assert puzzle.solve(layout, collisions, start, width, height) == [[((2, 2), "left")]]
