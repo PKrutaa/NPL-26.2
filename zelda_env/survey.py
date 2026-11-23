@@ -190,8 +190,11 @@ class Surveyor:
             return "interact"  # A is the item button outside dialogue
         return "use_b" if pyboy.memory[INVENTORY_B] == SWORD else None
 
-    def fight(self, state, action, *, max_loss, steps=160):
+    def fight(self, state, action, *, max_loss, steps=160, wound=False):
         """Simulate a sword fight. Return the inputs that kill one enemy, or None.
+
+        With `wound`, a hit that takes health from an enemy is enough: an enemy with many
+        hit points, or one that calls others, is beaten one blow at a time.
 
         The copy starts from the exact state of the game, so a fight that works here
         replays the same way in the main emulator.
@@ -200,6 +203,7 @@ class Surveyor:
             self._load(state)
             start = observe(self.shadow)
             count, health = len(enemies(self.shadow)), self.shadow.memory[HEALTH]
+            before = {foe["slot"]: foe["health"] for foe in enemies(self.shadow)}
             route, away, detour, previous = [], 0, 0, None
             for _ in range(steps):
                 obs = observe(self.shadow)
@@ -207,6 +211,9 @@ class Surveyor:
                 if obs.mode != "playing" or obs.room != start.room:
                     break  # leaving the room also empties the enemy list; that is not a win
                 if len(foes) < count:
+                    return tuple(route), health - self.shadow.memory[HEALTH]
+                now = {foe["slot"]: foe["health"] for foe in foes}
+                if wound and any(now.get(slot, 0) < points for slot, points in before.items()):
                     return tuple(route), health - self.shadow.memory[HEALTH]
                 if self.shadow.memory[HEALTH] < health - max_loss:
                     break
@@ -314,6 +321,7 @@ class Surveyor:
         sword = self.sword_action(pyboy)
         if foes and sword:
             # Prefer a fight without damage. Accept up to one heart while two remain after it.
+            won = None
             for max_loss in (0, HEART):
                 if max_loss and health - max_loss < 2 * HEART:
                     break
@@ -325,6 +333,20 @@ class Surveyor:
                         f"Attack the enemy {bearing(start, nearest['x'], nearest['y'])} with the sword{cost}", won[0],
                         short="Attack the enemy")
                     break
+            if not won:
+                # No kill within reach. One blow that lands is still progress, named by the
+                # health the enemies have left, so each further blow is a new option.
+                for max_loss in (0, HEART):
+                    if max_loss and health - max_loss < HEART:
+                        break
+                    hit = self.fight(root, sword, max_loss=max_loss, wound=True)
+                    if hit:
+                        nearest = max(foes, key=lambda item: item["health"])
+                        left = sum(item["health"] for item in foes)
+                        add(f"fight:{len(foes)}:{nearest['id']:02x}:hp{left}", "fight",
+                            f"Strike the enemy {bearing(start, nearest['x'], nearest['y'])} with the sword", hit[0],
+                            short="Attack the enemy")
+                        break
 
         while queue and expanded < limit:
             state, route = queue.popleft()
