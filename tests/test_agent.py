@@ -188,14 +188,15 @@ def test_a_known_exit_toward_the_goal_is_offered_again_a_limited_number_of_times
     made.memory.record(node, "exit:01:76")  # Link came in through it, so it is not new
     made.memory.edges[node] = {"exit:01:76": "01:76@0"}
     made.memory.arrive(node_of("01:76", []), [])
+    here = SimpleNamespace(room="04:e7", x=10, y=20, facing="up")
     offered = []
     made.policy.choose = lambda context, criteria: (
         offered.append(set(criteria.values())) or next(k for k, v in criteria.items() if v == "Go outside"), {})
     for _ in range(2):
-        chosen, origin, _ = made.decide(OBS, node, options, "Go outside.")
+        chosen, origin, _ = made.decide(here, node, options, "Go outside.")
         assert (chosen.id, origin) == ("exit:01:76", "laya")
     made.policy.choose = lambda context, criteria: (offered.append(set(criteria.values())) or sorted(criteria)[0], {})
-    chosen, origin, _ = made.decide(OBS, node, options, "Go outside.")
+    chosen, origin, _ = made.decide(here, node, options, "Go outside.")
     assert "Go outside" in offered[0] and "Go outside" in offered[1]
     # After that the door is no longer put to Laya as a choice: the known map leads out.
     assert len(offered) == 2 and origin == "route"

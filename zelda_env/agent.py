@@ -532,6 +532,9 @@ class Agent:
                     return door, "route", {}
 
         open_way = False
+        # Exits Link has gone through from any part of this room, in any story state.
+        taken = {name for place, links in self.memory.edges.items() if place.split("@")[0] == obs.room
+                 for name in links}
 
         def brief(option):
             text = option.short or option.description
@@ -542,7 +545,7 @@ class Agent:
             # So does an exit that was never taken, even to a room Link knows: it can lead
             # to a part of that room that the other way in does not reach.
             fresh_room = option.kind == "exit" and (
-                option.destination not in seen or option.id not in self.memory.edges.get(room, {}))
+                option.destination not in seen or option.id not in taken)
             return f"{text} to a new room" if fresh_room and text.startswith("Go ") else text
 
         def toward(option, goal):
@@ -649,7 +652,7 @@ class Agent:
             # No exit here leads anywhere new. What can still be done in this room comes
             # before walking back to a room already seen: the way on is opened from here.
             onward = [option for option in fresh if option.kind == "exit" and (
-                option.destination not in seen or option.id not in self.memory.edges.get(room, {}))]
+                option.destination not in seen or option.id not in taken)]
             local = [option for option in fresh if option.kind != "exit" and not loose_push(option)]
             if not onward and local:
                 fresh = local
