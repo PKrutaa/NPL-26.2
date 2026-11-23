@@ -38,6 +38,7 @@ _DUNGEON_TILES = frozenset((0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x2A, 0x2C, 0x2D, 0x2E
 _OVERWORLD_TILES = frozenset((0xD3, 0xF1, 0xF2, 0xD8, 0xD9, 0xEC, 0xDA))
 REACTIVE_TILES = {0: _OVERWORLD_TILES, 1: _DUNGEON_TILES | {0xAE}, 2: _DUNGEON_TILES, 3: frozenset((0xDA,)),
                   4: _OVERWORLD_TILES, 5: _DUNGEON_TILES}
+TOUGH_HEALTH = 8  # an enemy with at least this much health is fought one blow at a time
 MOVED_PIXELS = 6  # how far an object has to go to count as moved by a push
 CUBE_COLOR, CUBE_POSITION = 0xCCAD, 0xCCAE  # the rolling cube of the dungeons
 ITEM_COUNTS = slice(0xC6B0, 0xC6C0)  # bombs and the five kinds of seed, among others
@@ -190,7 +191,7 @@ class Surveyor:
             return "interact"  # A is the item button outside dialogue
         return "use_b" if pyboy.memory[INVENTORY_B] == SWORD else None
 
-    def fight(self, state, action, *, max_loss, steps=160, wound=False):
+    def fight(self, state, action, *, max_loss, steps=160, wound=False, target=None):
         """Simulate a sword fight. Return the inputs that kill one enemy, or None.
 
         With `wound`, a hit that takes health from an enemy is enough: an enemy with many
@@ -213,11 +214,13 @@ class Surveyor:
                 if len(foes) < count:
                     return tuple(route), health - self.shadow.memory[HEALTH]
                 now = {foe["slot"]: foe["health"] for foe in foes}
-                if wound and any(now.get(slot, 0) < points for slot, points in before.items()):
+                aimed = before if target is None else {target: before.get(target, 0)}
+                if wound and any(now.get(slot, 0) < points for slot, points in aimed.items()):
                     return tuple(route), health - self.shadow.memory[HEALTH]
                 if self.shadow.memory[HEALTH] < health - max_loss:
                     break
-                foe = min(foes, key=lambda item: abs(item["x"] - obs.x) + abs(item["y"] - obs.y))
+                foe = next((item for item in foes if item["slot"] == target), None) or min(
+                    foes, key=lambda item: abs(item["x"] - obs.x) + abs(item["y"] - obs.y))
                 dx, dy = foe["x"] - obs.x, foe["y"] - obs.y
                 toward = ("right" if dx > 0 else "left") if abs(dx) >= abs(dy) else ("down" if dy > 0 else "up")
                 side = abs(dy) if toward in ("left", "right") else abs(dx)
@@ -321,9 +324,13 @@ class Surveyor:
         sword = self.sword_action(pyboy)
         if foes and sword:
             # Prefer a fight without damage. Accept up to one heart while two remain after it.
+            # An enemy with this much health is the one that matters: the small ones around
+            # it come back, so blows go to it and the kills are left for later.
+            tough = max(foes, key=lambda item: item["health"])
+            tough = tough if tough["health"] >= TOUGH_HEALTH else None
             won = None
             for max_loss in (0, HEART):
-                if max_loss and health - max_loss < 2 * HEART:
+                if tough or (max_loss and health - max_loss < 2 * HEART):
                     break
                 won = self.fight(root, sword, max_loss=max_loss)
                 if won:
@@ -336,10 +343,13 @@ class Surveyor:
             if not won:
                 # No kill within reach. One blow that lands is still progress, named by the
                 # health the enemies have left, so each further blow is a new option.
-                for max_loss in (0, HEART):
-                    if max_loss and health - max_loss < HEART:
+                # A replayed fight costs exactly what it cost here, so any loss that leaves
+                # Link alive can be accepted when nothing gentler lands a blow.
+                for max_loss in (0, HEART, 2 * HEART):
+                    if max_loss >= health:
                         break
-                    hit = self.fight(root, sword, max_loss=max_loss, wound=True)
+                    hit = self.fight(root, sword, max_loss=max_loss, wound=True,
+                                     target=tough["slot"] if tough else None)
                     if hit:
                         nearest = max(foes, key=lambda item: item["health"])
                         left = sum(item["health"] for item in foes)
@@ -369,6 +379,10 @@ class Surveyor:
                 responded |= event != "blocked" or after.mode != "playing"
                 base_progress, base_layout = progress(self.shadow), room_layout(self.shadow)
                 step = (*route, (direction, stride))
+                if self.shadow.memory[HEALTH] > health and after.room == start.room and "collect:heart" not in found:
+                    # Link's health went up on this step: a heart or a fairy was lying here.
+                    add("collect:heart", "trigger", f"Pick up the heart {bearing(start, after.x, after.y)}",
+                        step, short="Pick up the item")
                 if self.shadow.memory[HEALTH] < health - tolerance:
                     continue  # do not plan a route that costs more health than allowed
                 # A scene or a slow transition hides the room for a while. Wait for it to
