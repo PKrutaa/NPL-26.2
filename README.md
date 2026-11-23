@@ -249,17 +249,25 @@ Para iterar em um trecho do jogo sem rodar desde o boot, o agente salva estado e
 
 Um trecho passa quando o objetivo é concluído sem corte de ciclo e sem impasse. Veja os [detalhes](docs/validation-agent.md#testes-por-trecho-e-por-caso).
 
-### Supervisor opcional
+### Supervisor
 
-O supervisor é um LLM pequeno que roda no [Ollama](https://ollama.com) local. Ele é consultado quando o agente fica sem opção nova, ou depois de 20 decisões sem progresso na história. Ele recebe o objetivo, a sala, as últimas ações e a lista de opções, e devolve o id de uma opção ou `abstain`. O código rejeita JSON inválido, id fora da lista e resposta depois de 20 segundos. Nesses casos o agente segue com a recuperação própria. O limite é de duas consultas por impasse, com seis decisões de intervalo.
+O supervisor é um LLM pequeno que roda no [Ollama](https://ollama.com) local. Ele fica ligado por padrão, com o modelo `gemma3:4b`. O agente o consulta em três situações:
+
+- o Laya escolheu com confiança abaixo de 0,6, ou seja, quase no empate;
+- não há opção nova em lugar nenhum;
+- passaram 20 decisões sem progresso na história.
+
+Ele recebe o objetivo, a sala, a vida, as últimas ações e a lista de opções, com a marca de quais já foram tentadas. Devolve o id de uma opção ou `abstain`. O código rejeita JSON inválido, id fora da lista e resposta depois de 20 segundos; nesses casos vale a escolha do Laya ou a recuperação própria do agente.
 
 ```bash
-ollama pull qwen2.5:1.5b          # uma vez, com rede
+ollama pull gemma3:4b             # uma vez, com rede
 ollama serve                      # se o servidor não estiver rodando
-.venv/bin/python -m zelda_env.agent --supervisor qwen2.5:1.5b
+.venv/bin/python -m zelda_env.agent                           # com supervisor
+.venv/bin/python -m zelda_env.agent --supervisor qwen2.5:7b   # outro modelo
+.venv/bin/python -m zelda_env.agent --no-supervisor           # sem supervisor
 ```
 
-Sem o servidor ou sem os pesos, o agente avisa e roda sem supervisor. Veja as [medições](docs/validation-agent.md).
+Sem o servidor ou sem os pesos, o agente avisa e roda sem supervisor. Cada decisão do supervisor aparece no `trace.jsonl` com a origem `supervisor` e o motivo que ele deu. Veja as [medições](docs/validation-agent.md).
 
 ## Testes
 

@@ -42,6 +42,8 @@ LOOP_WINDOW, LOOP_MOVES = 12, 4  # that many decisions made of at most this many
 RECIPE_STEPS = 12
 SWEEP_LIMIT = 80  # sweep decisions without story progress before declaring an impasse
 FIGHT_PATIENCE = 60  # looks in a row with an enemy in the room and no blow that lands
+UNSURE = 0.6  # below this confidence, Laya's choice goes to the supervisor
+DEFAULT_SUPERVISOR = "gemma3:4b"  # local Ollama model that supervises unless --no-supervisor
 SNAPSHOT_EVERY = 10  # decisions between the snapshots a run keeps on disk
 FAILURE_LOOKBACK = 6  # snapshots kept, one every five decisions
 MAX_HOPS = 14  # consecutive trips to a pending area with nothing new found
@@ -760,6 +762,18 @@ class Agent:
         keys = {f"option_{index + 1}": option for index, option in enumerate(candidates)}
         # Laya matches short text well and long text at chance, so it gets only the goal.
         key, laya = self.policy.choose({"goal": hint}, {key: brief(option) for key, option in keys.items()})
+        answer = laya.get("answer") if isinstance(laya, dict) else None
+        sure = answer.get("answer_confidence", 1.0) if isinstance(answer, dict) else 1.0
+        if self.supervisor and sure < UNSURE:
+            # Laya is close to a coin flip between these. The supervisor reads the room, the
+            # health and the last actions, which Laya does not get, and breaks the tie.
+            annotated = [(option.id, option.description + (
+                "" if not self.memory.tries(room, option.id) else " (already tried)")) for option in candidates]
+            choice, asked = self.supervisor.consult(context, annotated, self.decisions, unsure=True)
+            if choice:
+                return chosen(next(option for option in candidates if option.id == choice), "supervisor",
+                              {**asked, "laya": laya})
+            details = {**details, **asked}
         # The origin names who chose, so a comparison run is never attributed to Laya.
         return chosen(keys[key], getattr(self, "label", "laya"), {**details, "laya": laya})
 
@@ -1018,7 +1032,9 @@ def main():
     parser.add_argument("--decisions", type=int, default=200, help="Orçamento de decisões desta execução")
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--fresh", action="store_true", help="Ignora a sessão salva e recomeça do seed")
-    parser.add_argument("--supervisor", metavar="MODELO", help="Modelo Ollama local consultado em impasses")
+    parser.add_argument("--supervisor", metavar="MODELO", default=DEFAULT_SUPERVISOR,
+                        help=f"Modelo Ollama local que supervisiona as escolhas. Padrão: {DEFAULT_SUPERVISOR}")
+    parser.add_argument("--no-supervisor", action="store_true", help="Roda sem supervisor")
     parser.add_argument("--supervisor-timeout", type=float, default=20.0)
     parser.add_argument("--stall", type=int, default=20,
                         help="Decisões sem progresso na história antes de consultar o supervisor")
@@ -1041,7 +1057,7 @@ def main():
         parser.exit(1, f"Seed ausente: {start}. Gere com: {paths.venv_python()} -m zelda_env seed\n")
 
     supervisor = None
-    if args.supervisor:
+    if args.supervisor and not args.no_supervisor:
         from .supervisor import OllamaBackend, Supervisor, SupervisorUnavailable
 
         backend = OllamaBackend(args.supervisor)
@@ -1051,7 +1067,9 @@ def main():
             # The supervisor is optional. Without it the agent uses its own recovery.
             print(f"Supervisor desligado: {error}", flush=True)
         else:
+            backend.warm()  # the first answer would otherwise pay for loading the weights
             supervisor = Supervisor(backend, timeout=args.supervisor_timeout)
+            print(f"Supervisor ligado: {backend.name}", flush=True)
 
     if args.policy == "laya":
         from .laya_policy import LayaPolicy

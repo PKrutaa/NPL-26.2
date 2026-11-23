@@ -53,6 +53,13 @@ class OllamaBackend:
                 f"Pesos ausentes para {self.model}. Baixe uma vez, com rede: ollama pull {self.model}"
             )
 
+    def warm(self, timeout=120):
+        """Load the weights now, and keep them loaded between questions."""
+        try:
+            self._post("/api/generate", {"model": self.model, "prompt": "", "keep_alive": "30m"}, timeout)
+        except (OSError, ValueError):
+            pass  # a slow or failed load only makes the first answer late
+
     def complete(self, system, user, option_ids, timeout):
         schema = {
             "type": "object",
@@ -63,7 +70,7 @@ class OllamaBackend:
         try:
             reply = self._post("/api/chat", {
                 "model": self.model, "stream": False, "format": schema,
-                "options": {"temperature": 0, "num_predict": 80},
+                "options": {"temperature": 0, "num_predict": 80}, "keep_alive": "30m",
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
             }, timeout)
         except TimeoutError:
@@ -113,24 +120,35 @@ class Supervisor:
         self.interval = interval
         self.used = 0  # consultations in the current impasse
         self.last_decision = None
+        self.last_tie, self.tie_interval = None, 2  # decisions between two tie-breaks
         self.stats = {"calls": 0, "accepted": 0, "rejected": {}, "seconds": 0.0}
 
     def progressed(self):
         """The game confirmed progress, so the next impasse gets a fresh budget."""
         self.used = 0
 
-    def allowed(self, decision):
+    def allowed(self, decision, unsure=False):
+        if unsure:
+            # A tie-break is cheap and frequent: it has its own spacing and no impasse budget.
+            return self.last_tie is None or decision - self.last_tie >= self.tie_interval
         if self.used >= self.per_impasse:
             return False
         return self.last_decision is None or decision - self.last_decision >= self.interval
 
-    def consult(self, context, options, decision):
-        """Return (option_id or None, record). Never raises; rejection means fall back."""
-        if not self.allowed(decision):
+    def consult(self, context, options, decision, unsure=False):
+        """Return (option_id or None, record). Never raises; rejection means fall back.
+
+        With `unsure`, the question is a tie that the main model could not settle.
+        """
+        if not self.allowed(decision, unsure):
             return None, {"supervisor": "skipped_budget"}
         ids = [option_id for option_id, _ in options]
-        self.used += 1
-        self.last_decision = decision
+        if unsure:
+            self.last_tie = decision
+            self.stats["ties"] = self.stats.get("ties", 0) + 1
+        else:
+            self.used += 1
+            self.last_decision = decision
         self.stats["calls"] += 1
         started = time.perf_counter()
         choice, reason, rejection, raw = None, None, None, None

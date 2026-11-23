@@ -162,6 +162,8 @@ Se Link fica sem nenhuma opção, por exemplo cercado por um bloco empurrado par
 
 O código rejeita JSON inválido, id fora da lista e resposta depois de 20 segundos. O orçamento é de duas consultas por impasse, com seis decisões de intervalo. Sem servidor ou sem pesos, o agente roda sem supervisor.
 
+O supervisor fica ligado por padrão (`gemma3:4b`; `--no-supervisor` desliga). Além dos impasses, ele desempata quando o Laya escolhe com confiança abaixo de 0,6. O Laya recebe só o objetivo curto e as opções curtas; o supervisor recebe também a sala, a vida, as últimas ações e quais opções já foram tentadas, que é o que distingue duas opções de texto igual. O desempate tem espaçamento próprio de duas decisões e não gasta o orçamento de impasse.
+
 ## Consequências
 
 **O que melhora**

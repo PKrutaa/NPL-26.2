@@ -90,14 +90,17 @@ A sessão fica em `output\agent\`: `latest.state` e `memory.json` para retomar, 
 
 Veja [Testes por trecho e por caso](validation-agent.md#testes-por-trecho-e-por-caso) para o que cada comando faz.
 
-## Supervisor opcional
+## Supervisor
 
-Instale o [Ollama para Windows](https://ollama.com/download/windows). O instalador deixa o servidor rodando em segundo plano.
+O supervisor fica ligado por padrão. Instale o [Ollama para Windows](https://ollama.com/download/windows); o instalador deixa o servidor rodando em segundo plano.
 
 ```powershell
-ollama pull qwen2.5:1.5b
-.\.venv\Scripts\python.exe -m zelda_env.agent --supervisor qwen2.5:1.5b
+ollama pull gemma3:4b
+.\.venv\Scripts\python.exe -m zelda_env.agent
+.\.venv\Scripts\python.exe -m zelda_env.agent --no-supervisor
 ```
+
+Sem o Ollama ou sem os pesos, o agente avisa e roda sem supervisor.
 
 ## Testes unitários
 

@@ -518,3 +518,28 @@ def test_an_exit_never_taken_comes_before_one_that_only_looks_new_after_progress
     made.memory.edges[node] = {north.id: "B@0"}  # taken in an earlier story state
     chosen, origin, _ = made.decide(OBS, node, [north, east], "Go to a new room.")
     assert chosen is east and origin == "forced"
+
+
+def test_the_supervisor_breaks_a_tie_that_laya_could_not_settle():
+    class Unsure:
+        def choose(self, context, criteria):
+            return sorted(criteria)[0], {"answer": {"answer_confidence": 0.52}}
+
+    asked = []
+
+    class Tie:
+        stats = {}
+
+        def consult(self, context, options, decision, unsure=False):
+            asked.append(unsure)
+            return options[1][0], {"supervisor": "accepted"}
+
+        def progressed(self):
+            pass
+
+    made = agent(policy=Unsure(), supervisor=Tie())
+    options = [option("exit:B", "exit", "B"), option("exit:C", "exit", "C")]
+    node = node_of("A", options)
+    made.memory.arrive(node, options)
+    chosen, origin, _ = made.decide(OBS, node, options, "Go to a new room.")
+    assert asked == [True] and chosen is options[1] and origin == "supervisor"

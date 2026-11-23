@@ -123,6 +123,8 @@ def play(label, session, args, *, state=None, memory=None, until=None, until_roo
                "--directory", str(session), "--rom", str(args.rom)]
     if args.data_dir:
         command += ["--data-dir", str(args.data_dir)]
+    if getattr(args, "no_supervisor", False):
+        command += ["--no-supervisor"]
     if until:
         command += ["--until", until]
     if until_room:
@@ -145,6 +147,7 @@ def play(label, session, args, *, state=None, memory=None, until=None, until_roo
         return {"test": label, "status": "erro", "log": str(session / "agent.log")}
     result = {"test": label, **metrics(trace), "seconds": round(time.perf_counter() - started),
               "target": until or until_room, "budget": decisions, "policy": args.policy,
+              "supervisor": not getattr(args, "no_supervisor", False),
               "commit": revision(), "when": datetime.now().isoformat(timespec="seconds")}
     result["status"] = verdict(result, until, until_room, no_drops)
     del result["rooms"]
@@ -313,6 +316,8 @@ def main():
     casing.add_argument("case")
     for sub in (running, casing):
         sub.add_argument("--policy", choices=("laya", "random", "shortest"), default="laya")
+        sub.add_argument("--no-supervisor", action="store_true",
+                         help="Roda sem o supervisor, para comparação")
         sub.add_argument("--jobs", type=int, default=1,
                          help="Testes em paralelo. Com mais de um, os trechos não são encadeados")
     args = resolve_common(parser, parser.parse_args())
