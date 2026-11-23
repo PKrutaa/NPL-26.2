@@ -571,6 +571,9 @@ class Agent:
         foe = next((option for option in fresh if option.kind == "fight"), None)
         if inside and foe and any(loose_push(option) for option in fresh):
             return foe, "forced", {}
+        if inside and getattr(self, "foes_alive", False) and any(not loose_push(option) for option in fresh):
+            # An enemy is still alive but out of reach right now. The blocks wait for it.
+            fresh = [option for option in fresh if not loose_push(option)]
         # A push sequence that the survey worked out and checked is not a guess: do it.
         plan = next((option for option in fresh if option.id.startswith("solve:")), None)
         if plan:
@@ -855,6 +858,7 @@ class Agent:
         exits_now = {item.id for item in options if item.kind == "exit"}
         self.note_opening(node, exits_now, terrain)
         started = time.perf_counter()
+        self.foes_alive = bool(enemies(self.pyboy))
         option, origin, details = self.decide(obs, node, options, hint)
         choice_seconds = time.perf_counter() - started
         if option is not None:
