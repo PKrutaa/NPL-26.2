@@ -558,10 +558,10 @@ def test_heading_inside_dungeon_1_follows_its_map_not_the_room_numbers():
 def test_a_dungeon_step_ends_when_the_story_moves_on_in_its_room(monkeypatch):
     import zelda_env.agent as module
 
-    steps = (("04:1e", "Attack the enemy or pick up the item."), ("04:1a", "Use the item on the obstacle."))
+    steps = (("04:18", "Attack the enemy."), ("04:16", "Walk into the event."))
     monkeypatch.setattr(module, "OBJECTIVES", (("essencia", steps, "Go to a new room.", lambda pyboy: False),))
     made = agent()
-    assert made.objective("04:21") == ("essencia", "Go north.")
-    assert made.objective("04:1e") == ("essencia", "Attack the enemy or pick up the item.")
-    made.memory.enter(b"small key in the bag")
-    assert made.objective("04:1e") == ("essencia", "Go north or west.")
+    assert made.objective("04:14") == ("essencia", "Go south.")
+    assert made.objective("04:18") == ("essencia", "Attack the enemy.")
+    made.memory.enter(b"mini-boss gone")
+    assert made.objective("04:18") == ("essencia", "Go east or north.")

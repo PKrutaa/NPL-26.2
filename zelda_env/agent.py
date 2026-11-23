@@ -88,12 +88,11 @@ OBJECTIVES = (
      "Use the item on the obstacle or pick up the item.", _flag(TREASURES, 0x42)),
     ("dungeon-1", (("00:8d", "Enter the door or stairs."),), "Enter the door or stairs.",
      lambda pyboy: bool(pyboy.memory[GROUP4_ROOM_FLAGS + 0x24] & ROOM_VISITED)),
-    # Dungeon 1, in the order the rooms have to be done: three small keys, the mini-boss,
-    # the torches that bring out the stairs to the Power Bracelet, the boss key, the boss.
-    ("essencia-1", (("04:1e", "Attack the enemy or pick up the item."),
-                    ("04:1a", "Use the item on the obstacle."),
+    # Dungeon 1: the rooms that have to be done in this order. The mini-boss, the third small
+    # key (the first two are on the way and need no pointing at), the torches that bring out
+    # the stairs to the Power Bracelet, the boss key, the boss and the essence.
+    ("essencia-1", (("04:18", "Attack the enemy."),
                     ("04:16", "Walk into the event or use the item on the obstacle."),
-                    ("04:18", "Attack the enemy."),
                     ("04:1b", "Use the item on the obstacle."),
                     ("04:10", "Pick up the item."),
                     ("04:23", "Use the item on the obstacle."),
@@ -459,6 +458,7 @@ class Agent:
             # Kept per objective step, not per story state: progress elsewhere (a gate
             # unlocked) does not put the task back in a part where nothing was left.
             self.spent = state.setdefault("spent", [])
+            self.steps_left = (state, len(steps))
             while room and state["step"] < len(steps):
                 target, task = steps[state["step"]]
                 last = state["step"] == len(steps) - 1
@@ -710,6 +710,11 @@ class Agent:
             option.kind == "exit" and toward(option, hint[:-1]) for option in fresh)
         if impasse and getattr(self, "landmark", None) == obs.room and room not in spent:
             spent.append(room)
+            state, total = getattr(self, "steps_left", (None, 0))
+            if state is not None and obs.room[:2] not in OVERWORLD and state["step"] < total - 1:
+                # Nothing is left to do in this dungeon room, so its task was done on an
+                # earlier visit, before the steps pointed here. Move on to the next one.
+                state.update(step=state["step"] + 1, arrived=False, epoch=None, spent=[])
 
         def by_recipe(exit_id):
             """The next thing to do here to get through an exit that is closed right now."""

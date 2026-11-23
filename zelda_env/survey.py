@@ -220,7 +220,9 @@ class Surveyor:
                         wound and any(now.get(slot, 0) < points for slot, points in aimed.items())):
                     # Every way of fighting is tried, and the one that costs least is kept.
                     result = (tuple(route), health - self.shadow.memory[HEALTH])
-                    if best is None or (result[1], len(result[0])) < (best[1], len(best[0])):
+                    # A blow that lands as Link takes more than the allowed loss does not count.
+                    if result[1] <= max_loss and (
+                            best is None or (result[1], len(result[0])) < (best[1], len(best[0]))):
                         best = result
                     break
                 if self.shadow.memory[HEALTH] < health - max_loss:
