@@ -251,7 +251,8 @@ class Memory:
         if visits[node] > ROOM_REVISITS:
             return
         for key in [key for key in self.current["tried"]
-                    if key.startswith(f"{node}|push:") and key not in self.current.get("stale", [])]:
+                    if key.startswith((f"{node}|push:", f"{node}|solve:"))
+                    and key not in self.current.get("stale", [])]:
             del self.current["tried"][key]
 
     def record(self, node, option_id):
@@ -560,6 +561,10 @@ class Agent:
         loot = next((option for option in fresh if option.id.startswith("collect:")), None)
         if loot:
             return loot, "forced", {}
+        # A push sequence that the survey worked out and checked is not a guess: do it.
+        plan = next((option for option in fresh if option.id.startswith("solve:")), None)
+        if plan:
+            return plan, "forced", {}
         # A way that the last action opened is taken before any known path: a gate that
         # was just unlocked is the way forward, even when the map knows another one.
         opened = getattr(self, "just_opened", ())

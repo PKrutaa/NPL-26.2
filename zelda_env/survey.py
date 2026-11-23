@@ -5,6 +5,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from io import BytesIO
 
+from . import puzzle
 from .adapter import DIRECTIONS, enemies, execute, observe, room_layout
 
 DELTA = {"up": (0, -1), "right": (1, 0), "down": (0, 1), "left": (-1, 0)}
@@ -23,6 +24,7 @@ PROGRESS_RANGES = (
 ROOM_FLAGS = 0xC700  # four 256-byte tables: present, past, groups 4 and 5
 ROOM_VISITED = 0x10
 HEALTH = 0xC6AA
+TREASURES, BRACELET = 0xC69A, 0x16  # obtained-treasure bits; the Power Bracelet
 ESSENCES = 0xC6BF
 TEXT_INDEX = 0xCBA2
 COLLISIONS = 0xCE00  # same 16-byte row stride as the layout
@@ -616,4 +618,98 @@ class Surveyor:
             "Use the item")), key=lambda option: len(option.route))
         for option in tool_uses[TOOL_OPTIONS:]:
             del found[option.id]
+        if pushes and not self.volatile and not foes:
+            plans = self.block_plans(root, health - tolerance)
+            for route, pushed in plans:
+                name = "solve:" + hashlib.sha1(repr(pushed).encode()).hexdigest()[:8]
+                add(name, "push", f"Push the {len(pushed)} blocks in the order that opens a way", route,
+                    short="Push the object")
+            if plans:
+                # One block pushed on its own can shut the way the plan opens.
+                for name in [name for name in found if name.startswith("push:") and not name.startswith("push:slot")]:
+                    del found[name]
         return list(found.values())
+
+    def block_plans(self, root, floor):
+        """Push sequences that open a way, each replayed here before it is offered.
+
+        Returns (route, pushes) pairs. The search is on the tile grid (see puzzle.py);
+        the replay walks Link to each block in this copy and checks that it moved.
+        """
+        self._load(root)
+        memory = self.shadow.memory
+        width, height = (15, 11) if memory[0xCD01] != 1 else (10, 8)
+        if memory[ACTIVE_COLLISIONS] not in (1, 2, 5):
+            return []  # the block rules in puzzle.py are the ones of dungeons and indoors
+
+        def grid():
+            layout = {(x, y): memory[0xCF00 + y * 16 + x] for y in range(height) for x in range(width)}
+            solid = {(x, y): memory[COLLISIONS + y * 16 + x] for y in range(height) for x in range(width)}
+            return layout, solid
+
+        def cell():
+            seen = observe(self.shadow)
+            return (seen.x // 16, seen.y // 16)
+
+        layout, solid = grid()
+        bracelet = bool(memory[TREASURES + BRACELET // 8] >> (BRACELET % 8) & 1)
+        plans = []
+        for pushed in puzzle.solve(layout, solid, cell(), width, height, bracelet=bracelet):
+            self._load(root)
+            route, good = [], True
+            for block, direction in pushed:
+                layout, solid = grid()
+                walls = {place for place, value in solid.items() if value}
+                dx, dy = puzzle.STEP[direction]
+                path = puzzle.walk(walls, (), cell(), (block[0] - dx, block[1] - dy), width, height)
+                good = path is not None and self._walk_cells(path, route) and self._push_block(
+                    block, direction, route)
+                if not good or self.shadow.memory[HEALTH] < floor or observe(self.shadow).mode != "playing":
+                    good = False
+                    break
+            if good and not self._hurt_after(floor):
+                plans.append((tuple(route), pushed))
+        return plans
+
+    def _walk_cells(self, path, route):
+        """Walk Link through the middle of each cell of `path`, recording the inputs."""
+        for target in path[1:]:
+            goal = (target[0] * 16 + 8, target[1] * 16 + 8)
+            for _ in range(40):
+                seen = observe(self.shadow)
+                if seen.mode != "playing":
+                    return False
+                off_x, off_y = goal[0] - seen.x, goal[1] - seen.y
+                if abs(off_x) <= 1 and abs(off_y) <= 1:
+                    break
+                # The longer way first, so Link lines up with the corridor he is entering.
+                if abs(off_x) >= abs(off_y):
+                    move = ("right" if off_x > 0 else "left", min(abs(off_x), 8))
+                else:
+                    move = ("down" if off_y > 0 else "up", min(abs(off_y), 8))
+                after, _, _ = execute(self.shadow, move[0], hold_frames=move[1])
+                route.append(move)
+                if (after.x, after.y) == (seen.x, seen.y):
+                    # Stopped against a corner: line up on the other axis and try again.
+                    other = (("down" if off_y > 0 else "up", max(1, min(abs(off_y), 8))) if move[0] in ("left", "right")
+                             else ("right" if off_x > 0 else "left", max(1, min(abs(off_x), 8))))
+                    execute(self.shadow, other[0], hold_frames=other[1])
+                    route.append(other)
+            else:
+                return False
+        return True
+
+    def _push_block(self, block, direction, route):
+        """Hold toward the block until its tile changes."""
+        memory = self.shadow.memory
+        index = block[1] * 16 + block[0]
+        before = memory[0xCF00 + index]
+        for hold in (32, 44, 60):
+            state = self._capture()
+            probe = ((direction, hold), ("wait", 30))
+            run_route(self.shadow, probe)
+            if memory[0xCF00 + index] != before:
+                route.extend(probe)
+                return True
+            self._load(state)
+        return False

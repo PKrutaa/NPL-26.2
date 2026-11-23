@@ -472,3 +472,12 @@ def test_an_object_whose_push_opened_the_doors_is_not_pushed_again():
     memory.unlocked("04:20@0", "push:slot4@10:5:1:up", {door.id})
     assert memory.fresh("04:20@0", [door, *more]) == [door]
     assert memory.fresh("04:20@0", more) == more  # the doors are shut again: the cube is back at the start
+
+
+def test_a_checked_push_sequence_is_done_without_asking():
+    made = agent()
+    plan, door = option("solve:37098294", "push"), option("exit:B", "exit", "B")
+    node = node_of("A", [door])
+    made.memory.arrive(node, [plan, door])
+    chosen, origin, _ = made.decide(OBS, node, [plan, door], "Go to a new room.")
+    assert chosen is plan and origin == "forced"
