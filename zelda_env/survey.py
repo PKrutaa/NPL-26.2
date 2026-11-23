@@ -27,6 +27,15 @@ ESSENCES = 0xC6BF
 TEXT_INDEX = 0xCBA2
 COLLISIONS = 0xCE00  # same 16-byte row stride as the layout
 INVENTORY_B, INVENTORY_A = 0xC688, 0xC689
+# Tiles that react when Link pushes against them (blocks, key blocks, key doors, chests,
+# signs, keyholes), by wActiveCollisions. From data/ages/tile_properties/interactableTiles.s
+# of the pinned disassembly. Pushing any other tile does nothing, so it is not probed.
+ACTIVE_COLLISIONS = 0xCC33
+_DUNGEON_TILES = frozenset((0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x2A, 0x2C, 0x2D, 0x2E, 0x10, 0x11, 0x12, 0x13, 0x25,
+                            0x07, 0x1E, *range(0x70, 0x78), 0x1F, 0x30, 0x31, 0x32, 0x33, 0x08, 0xF1, 0xF2))
+_OVERWORLD_TILES = frozenset((0xD3, 0xF1, 0xF2, 0xD8, 0xD9, 0xEC, 0xDA))
+REACTIVE_TILES = {0: _OVERWORLD_TILES, 1: _DUNGEON_TILES | {0xAE}, 2: _DUNGEON_TILES, 3: frozenset((0xDA,)),
+                  4: _OVERWORLD_TILES, 5: _DUNGEON_TILES}
 MOVED_PIXELS = 6  # how far an object has to go to count as moved by a push
 CUBE_COLOR, CUBE_POSITION = 0xCCAD, 0xCCAE  # the rolling cube of the dungeons
 ITEM_COUNTS = slice(0xC6B0, 0xC6C0)  # bombs and the five kinds of seed, among others
@@ -91,6 +100,8 @@ class Surveyor:
         self.shadow = PyBoy(str(rom), window="null", ram_file=BytesIO(bytes(8192)), sound_volume=0)
         self.shadow.set_emulation_speed(0)
         self.volatile = False
+        self.inert = set()  # pushes already found to move nothing
+        self.dull = set()  # item uses already found to change nothing
 
     def close(self):
         self.shadow.stop(save=False)
@@ -460,15 +471,30 @@ class Surveyor:
                 if stand in poked:
                     continue
                 poked.add(stand)
-                blocked = self._capture()
+                # Saving a state is the most expensive step here. It is taken only when a
+                # probe is about to run, while the copy still stands where the step ended.
+                held = []
+
+                def at_obstacle():
+                    if not held:
+                        held.append(self._capture())
+                    else:
+                        self._load(held[0])
                 tx, ty = after.x + dx * 14, after.y + dy * 14
                 near = sorted(after.entities, key=lambda item: abs(item["x"] - tx) + abs(item["y"] - ty))
                 entity = near[0] if near and abs(near[0]["x"] - tx) + abs(near[0]["y"] - ty) <= 20 else None
                 target = f"slot{entity['slot']}" if entity else f"{tile[0]}:{tile[1]}"
                 where = bearing(start, tx, ty)
+                index = tile[1] * 16 + tile[0]
+                ahead_tile = base_layout[index] if 0 <= index < len(base_layout) else None
                 for kit in kits:
                     item, button, action, menu = kit
-                    self._load(blocked)
+                    # What an item did not affect from this exact spot, it will not affect on
+                    # the next survey either, while the tile and the story are the same.
+                    dull = (start.room, target, stand, item, ahead_tile, base_progress)
+                    if dull in self.dull:
+                        continue
+                    at_obstacle()
                     wield(kit)
                     probe = ((action, 1), ("wait", 20))
                     stock = bytes(self.shadow.memory[ITEM_COUNTS])
@@ -483,6 +509,8 @@ class Surveyor:
                     if self.shadow.memory[HEALTH] < health - tolerance:
                         continue
                     if not self._changed(base_progress, base_layout, "playing"):
+                        if not self.volatile:
+                            self.dull.add(dull)
                         continue
                     probed = observe(self.shadow)
                     opened = probed.mode == "dialogue"
@@ -526,6 +554,11 @@ class Surveyor:
                     break
                 if not pushes:
                     continue  # the push probe is the slowest; the quick pass leaves it out
+                index = tile[1] * 16 + tile[0]
+                reactive = REACTIVE_TILES.get(self.shadow.memory[ACTIVE_COLLISIONS])
+                if not entity and reactive is not None and not (
+                        0 <= index < len(base_layout) and base_layout[index] in reactive):
+                    continue  # a wall, or anything else the game does not let Link push
                 # An object that moves when pushed is named by where it is, and the rolling
                 # cube also by the face that is up: the same push from a new place is a new option.
                 if entity:
@@ -533,6 +566,11 @@ class Surveyor:
                     target = f"{target}@{entity['x'] // 16}:{entity['y'] // 16}{cube}"
                 if f"push:{target}:{direction}" in found or push_tries.get((target, direction), 0) >= 2:
                     continue  # known, or tried from two standing spots already
+                # An object that did not move when pushed from here will not move next time
+                # either, while the story is the same. Statues are the common case.
+                inert = (start.room, target, direction, base_progress)
+                if entity and inert in self.inert:
+                    continue
                 push_tries[(target, direction)] = push_tries.get((target, direction), 0) + 1
                 # Pushing needs Link lined up with the tile. Try as he stands, then nudged
                 # to the middle of it. Hold only as long as needed: after the object moves,
@@ -546,7 +584,7 @@ class Surveyor:
                     nudges.append(((sideways[0] if offset > 0 else sideways[1], abs(offset)),))
                 for nudge in nudges:
                     for hold in (32, 44, 60):
-                        self._load(blocked)
+                        at_obstacle()
                         probe = (*nudge, (direction, hold), ("wait", 30))
                         pushed, _ = run_route(self.shadow, probe)
                         if self.shadow.memory[HEALTH] < health - tolerance:
@@ -558,7 +596,7 @@ class Surveyor:
                         if self._hurt_after(health - tolerance):
                             break  # it moved, but Link then walked into a pit
                         # Rule out things that happen anyway, such as a character walking by.
-                        self._load(blocked)
+                        at_obstacle()
                         idle, _ = run_route(self.shadow, (("wait", hold), ("wait", 30)))
                         if not self._pushed(entity, idle, base_progress, base_layout):
                             add(f"push:{target}:{direction}", "push",
@@ -567,6 +605,8 @@ class Surveyor:
                         break
                     if f"push:{target}:{direction}" in found:
                         break
+                if entity and f"push:{target}:{direction}" not in found:
+                    self.inert.add(inert)
             if route and not responded:
                 # Controls that stop answering right after a walk mean a scene is about to start.
                 linger(state, route, here)
