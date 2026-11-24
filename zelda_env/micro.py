@@ -159,14 +159,19 @@ class Planner:
 
 
 class MicroAgent:
-    def __init__(self, pyboy, policy, planner, *, objectives, watch=False, log=None):
+    def __init__(self, pyboy, policy, planner, *, objectives, watch=False, log=None, history=False):
         self.pyboy, self.policy, self.planner = pyboy, policy, planner
+        # With the screen history in the state, the 4B supervisor did worse in the first
+        # measurement (it paced left and right on one screen), so it is off unless asked for.
+        self.history = history
         self.objectives, self.watch, self.log = objectives, watch, log
         self.steps = 0
         self.goal, self.reason, self.goal_age = None, None, PLAN_EVERY
         self.recent = deque(maxlen=8)
         self.still = 0  # inputs in a row with no effect; told to the supervisor as it is
         self.failed_goals = deque(maxlen=4)  # goals that changed nothing on this screen
+        # What the supervisor is told about where Link has been. It is history, not a plan.
+        self.visits, self.leaves, self.path = {}, {}, deque(maxlen=8)
         self.done = [item[0] for item in objectives if item[3](pyboy)]
         self.inputs = {}
 
@@ -195,6 +200,11 @@ class MicroAgent:
             "last inputs": "; ".join(self.recent) or "none yet",
             "last goal": self.goal or "none",
             "goals that changed nothing on this screen": "; ".join(self.failed_goals) or "none",
+            **({"times link has been on this screen": self.visits.get(seen.room, 0) + 1,
+                "how link left this screen before": ", ".join(
+                    f"{side} {count}x" for side, count in sorted(self.leaves.get(seen.room, {}).items()))
+                or "never left it",
+                "screens visited lately": " > ".join(self.path) or "only this one"} if self.history else {}),
             "map": screen_map(self.pyboy) or "no map (a scene or a menu)",
         }
         goal, reason = self.planner.goal(state) if self.planner else (None, None)
@@ -206,8 +216,14 @@ class MicroAgent:
     def step(self):
         seen = observe(self.pyboy)
         name = self.objective()
-        if seen.mode in ("transition", "unknown", "locked", "menu") and not seen.dialogue_ready:
-            execute(self.pyboy, "wait", render=self.watch)  # nothing to choose while the game has the controls
+        # The text box takes a press when a page is full, and in the states where it waits
+        # for one before going on. In between it is writing and ignores the buttons.
+        writing = (seen.mode == "dialogue" and not seen.dialogue_ready
+                   and self.pyboy.memory[7, 0xD0C0] not in (2, 4, 10))
+        if writing or (seen.mode in ("transition", "unknown", "locked", "menu") and not seen.dialogue_ready):
+            # Nothing to choose while the game has the controls or the text is still being
+            # written: a button pressed now does nothing, so it is not counted as an input.
+            execute(self.pyboy, "wait", render=self.watch)
             return
         stuck = self.still and self.still % STUCK_AFTER == 0
         if self.goal is None or self.goal_age >= PLAN_EVERY or stuck:
@@ -235,9 +251,13 @@ class MicroAgent:
         self.goal_age += 1
         self.inputs[key] = self.inputs.get(key, 0) + 1
         self.recent.append(f"{key} -> {event}")
-        if after.room != seen.room:
+        if after.room != seen.room and seen.room and after.room:
             self.goal_age = PLAN_EVERY  # a new screen needs a new goal
             self.failed_goals.clear()
+            self.visits[seen.room] = self.visits.get(seen.room, 0) + 1
+            side = {"up": "north", "down": "south", "left": "west", "right": "east"}.get(key, "door or stairs")
+            self.leaves.setdefault(seen.room, {})[side] = self.leaves.get(seen.room, {}).get(side, 0) + 1
+            self.path.append(seen.room)
         reached = [item[0] for item in self.objectives if item[3](self.pyboy) and item[0] not in self.done]
         self.done.extend(reached)
         answer = details.get("answer") if isinstance(details, dict) else None
@@ -270,6 +290,8 @@ def main():
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--supervisor", metavar="MODELO", default=DEFAULT_SUPERVISOR)
     parser.add_argument("--no-supervisor", action="store_true", help="Sem metas do supervisor (comparação)")
+    parser.add_argument("--history", action="store_true",
+                        help="Inclui no texto do supervisor as telas visitadas e por onde Link saiu de cada uma")
     parser.add_argument("--until", metavar="OBJETIVO", choices=[item[0] for item in OBJECTIVES])
     parser.add_argument("--until-room", metavar="SALA")
     parser.add_argument("--device", choices=("cpu", "mps"), default="cpu")
@@ -303,7 +325,8 @@ def main():
             pyboy.load_state(stream)
         print(f"Sessão iniciada de {start}", flush=True)
         with (directory / "trace.jsonl").open("w", encoding="utf-8") as log:
-            agent = MicroAgent(pyboy, policy, planner, objectives=OBJECTIVES, watch=not args.headless, log=log)
+            agent = MicroAgent(pyboy, policy, planner, objectives=OBJECTIVES, watch=not args.headless, log=log,
+                               history=args.history)
             reason, started = "orçamento de inputs", time.perf_counter()
             guard = 0
             try:
