@@ -106,8 +106,11 @@ MEMORY_RULES = (
 )
 
 
-def screen_map(pyboy):
-    """The room as rows of characters, read from the game's memory. Nothing is simulated."""
+def screen_map(pyboy, followers=()):
+    """The room as rows of characters, read from the game's memory. Nothing is simulated.
+
+    `followers` are the slots of characters that walk along with Link, drawn as `f`.
+    """
     memory, seen = pyboy.memory, observe(pyboy)
     if seen.room is None:
         return None
@@ -130,7 +133,7 @@ def screen_map(pyboy):
             rows[y // 16][x // 16] = mark
 
     for item in seen.entities:
-        put(item["x"], item["y"], "N")
+        put(item["x"], item["y"], "f" if item["slot"] in followers else "N")
     for item in enemies(pyboy):
         put(item["x"], item["y"], "E")
     put(seen.x, seen.y, "@")
@@ -152,6 +155,32 @@ def open_edges(pyboy):
     parts = [f"{side} (at {'columns' if side in ('north', 'south') else 'rows'} {', '.join(map(str, cells))})"
              for side, cells in sides.items() if cells]
     return "; ".join(parts) or "none: this screen is left through a door or stairs"
+
+
+def reachable_exits(pyboy):
+    """The sides of the screen that have a walkable way from where Link stands.
+
+    A flood over the floor cells of the character map. The game is not run for this.
+    """
+    lines = (screen_map(pyboy) or "").split("\n")
+    seen = observe(pyboy)
+    if seen.room is None or not lines[0]:
+        return "unknown"
+    height, width = len(lines), len(lines[0])
+    start = (seen.x // 16, seen.y // 16)
+    reached, queue = {start}, deque([start])
+    while queue:
+        x, y = queue.popleft()
+        for dx, dy in puzzle.STEP.values():
+            cell = (x + dx, y + dy)
+            if 0 <= cell[0] < width and 0 <= cell[1] < height and cell not in reached and lines[cell[1]][cell[0]] in ".s@Nf":
+                reached.add(cell)
+                queue.append(cell)
+    sides = {"north": [x for x, y in reached if y == 0], "south": [x for x, y in reached if y == height - 1],
+             "west": [y for x, y in reached if x == 0], "east": [y for x, y in reached if x == width - 1]}
+    parts = [f"{side} (at {'columns' if side in ('north', 'south') else 'rows'} {', '.join(map(str, sorted(cells)))})"
+             for side, cells in sides.items() if cells]
+    return "; ".join(parts) or "none from here"
 
 
 def around(pyboy):
@@ -235,6 +264,8 @@ class Player:
         # the note it writes to itself. Everything in it comes from the supervisor's own goals.
         self.journal, self.by_screen, self.tally = deque(maxlen=6), {}, None
         self.memory, self.texts = False, False
+        self.mark_followers, self.paths = False, False
+        self.near, self.followers = {}, set()  # slot -> walks it stayed next to Link; slots that follow him
         self.done = [item[0] for item in objectives if item[3](pyboy)]
         self.inputs = {}
 
@@ -272,7 +303,10 @@ class Player:
             **({"journal": "\n".join(self.journal) or "empty",
                 "tried on this screen": "\n".join(self.by_screen.get(seen.room, ())) or "nothing yet",
                 "your note": (self.planner.note if self.planner else None) or "none"} if self.memory else {}),
-            "map": screen_map(self.pyboy) or "no map (a scene or a menu)",
+            **({"sides link can walk to from here": reachable_exits(self.pyboy)} if self.paths else {}),
+            **({"note": "the mark f on the map is a character that walks along with Link by itself; "
+                        "walking toward it does nothing"} if self.mark_followers and self.followers else {}),
+            "map": screen_map(self.pyboy, self.followers if self.mark_followers else ()) or "no map (a scene or a menu)",
         }
         self.close_goal(seen.room)
         goal, reason = self.planner.goal(state, self.memory) if self.planner else (None, None)
@@ -340,6 +374,12 @@ class Player:
         self.goal_age += 1
         self.inputs[key] = self.inputs.get(key, 0) + 1
         self.recent.append(f"{key} -> {event}")
+        if key in puzzle.STEP and event in ("moved", "room_changed") and after.room:
+            # Someone still next to Link after he has walked several times is walking with him.
+            close = {item["slot"] for item in after.entities
+                     if abs(item["x"] - after.x) + abs(item["y"] - after.y) <= 28}
+            self.near = {slot: self.near.get(slot, 0) + 1 for slot in close}
+            self.followers = {slot for slot, count in self.near.items() if count >= 3}
         if self.tally:
             self.tally["events"][event] = self.tally["events"].get(event, 0) + 1
         if after.room != seen.room and seen.room and after.room:
@@ -384,6 +424,10 @@ def main():
     parser.add_argument("--no-think", action="store_true",
                         help="Desliga a fase de raciocínio de modelos que têm uma (sem isso eles devolvem vazio)")
     parser.add_argument("--supervisor-timeout", type=float, default=30.0)
+    parser.add_argument("--followers", action="store_true",
+                        help="Marca no mapa, com f, o personagem que acompanha Link")
+    parser.add_argument("--paths", action="store_true",
+                        help="Diz ao supervisor a que lados da tela dá para chegar andando de onde Link está")
     parser.add_argument("--reach", action="store_true",
                         help="O supervisor diz por quantos inputs a meta vale, em vez de oito fixos")
     parser.add_argument("--memory", action="store_true",
@@ -429,6 +473,7 @@ def main():
             agent = Player(pyboy, policy, planner, objectives=OBJECTIVES, watch=not args.headless, log=log,
                                history=args.history)
             agent.memory, agent.texts = args.memory, args.texts
+            agent.mark_followers, agent.paths = args.followers, args.paths
             if planner:
                 planner.reach = args.reach
             reason, started = "orçamento de inputs", time.perf_counter()
