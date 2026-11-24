@@ -49,6 +49,15 @@ WHAT_FOR = {
     "essencia-1": "Finish Spirit's Grave: small keys, the mini-boss, the Power Bracelet, the boss, the essence.",
     "oito-essencias": "Collect the eight essences.",
 }
+# What a strategy guide says about each objective. It is text for the supervisor to read, with
+# the --guide option: it does not move Link, and the supervisor may follow it or not.
+GUIDE = {
+    "espada": ("Walk north three screens. On the way a woman, Impa, joins Link and then follows him by herself: "
+               "do not walk toward her. Then go west one screen. There a big rock with a mark blocks the way "
+               "north: stand on its left side and walk right into it to push it east. Then go north two screens "
+               "to a clearing with a singer and animals. Talk to them with A until the story goes on, then walk "
+               "back south."),
+}
 SYSTEM = (
     "You guide a player of The Legend of Zelda: Oracle of Ages on the Game Boy Color. The player can only press "
     "one button at a time: up, down, left, right, A or B. You do not press buttons. You read the state and write "
@@ -265,6 +274,7 @@ class Player:
         self.journal, self.by_screen, self.tally = deque(maxlen=6), {}, None
         self.memory, self.texts = False, False
         self.mark_followers, self.paths = False, False
+        self.guide = False
         self.near, self.followers = {}, set()  # slot -> walks it stayed next to Link; slots that follow him
         self.done = [item[0] for item in objectives if item[3](pyboy)]
         self.inputs = {}
@@ -282,6 +292,7 @@ class Player:
         hearts = health(self.pyboy)
         state = {
             "objective": WHAT_FOR.get(name, name or "explore"),
+            **({"what a guide says about this objective": GUIDE[name]} if self.guide and name in GUIDE else {}),
             "text on screen": "yes, press A to continue it" if seen.mode == "dialogue" else "no",
             "link can walk": "yes" if seen.mode == "playing" else "no",
             "room": seen.room,
@@ -424,6 +435,8 @@ def main():
     parser.add_argument("--no-think", action="store_true",
                         help="Desliga a fase de raciocínio de modelos que têm uma (sem isso eles devolvem vazio)")
     parser.add_argument("--supervisor-timeout", type=float, default=30.0)
+    parser.add_argument("--guide", action="store_true",
+                        help="Dá ao supervisor o texto de um guia sobre o objetivo atual")
     parser.add_argument("--followers", action="store_true",
                         help="Marca no mapa, com f, o personagem que acompanha Link")
     parser.add_argument("--paths", action="store_true",
@@ -474,6 +487,7 @@ def main():
                                history=args.history)
             agent.memory, agent.texts = args.memory, args.texts
             agent.mark_followers, agent.paths = args.followers, args.paths
+            agent.guide = args.guide
             if planner:
                 planner.reach = args.reach
             reason, started = "orçamento de inputs", time.perf_counter()
