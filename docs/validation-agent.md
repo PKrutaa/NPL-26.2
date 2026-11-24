@@ -294,6 +294,37 @@ A busca de empurrões também vale para a caverna do passado. O trecho `maku-tre
 
 A lista completa de passos da dungeon está em [research-mecanicas-ages.md](research-mecanicas-ages.md).
 
+## Modo micro: o Laya aperta um botão por vez
+
+O agente por opções decide pouco com os modelos. Na dungeon 1, 41 de 64 decisões de uma rodada foram regra do agente e 7 foram do Laya: o código simula a sala, lista o que dá para fazer, resolve os blocos e simula as lutas. O modo micro (`zelda_env/micro.py`) tira isso do caminho da decisão.
+
+| Papel | Modo opções | Modo micro |
+| --- | --- | --- |
+| Laya | Escolhe entre opções prontas | Escolhe um botão por input: cima, baixo, esquerda, direita, A ou B |
+| Supervisor | Desempata | Lê o estado em texto e escreve a meta curta do momento |
+| Código | Simula a sala, lista opções, resolve blocos e lutas, corta ciclos | Lê o jogo, monta o texto e aperta o botão escolhido |
+
+O supervisor recebe só texto: o que o objetivo pede em uma frase, a sala, a posição de Link, um mapa da tela em caracteres lido da memória do jogo, os lados por onde a tela pode ser deixada, a vida, os últimos inputs e as metas que não mudaram nada naquela tela. Nada é simulado à frente e nenhuma regra corta ciclos.
+
+```
+python -m zelda_env.micro --headless --steps 600 --until espada
+python -m zelda_env.segments run espada --mode micro --decisions 600
+```
+
+Primeira medição, no trecho `espada` (do boot até a espada), com `gemma3:4b` como supervisor:
+
+| Medida | Modo opções | Modo micro |
+| --- | --- | --- |
+| Resultado | Passou | Não concluiu |
+| Orçamento usado | 23 decisões | 600 inputs |
+| Salas visitadas | 14 | 4 |
+| Maior trecho repetitivo | 4 | 94 |
+| Tempo | 5 minutos | 7 minutos |
+
+No modo micro Link foi para o norte por três telas, como o caminho pede, abriu um diálogo e depois ficou parado: o supervisor repetiu a mesma meta e o Laya apertou A 88 vezes no mesmo lugar. Com `qwen2.5:7b` como supervisor, em 150 inputs Link não saiu da primeira tela.
+
+Este é o ponto de partida do modo micro. O modo opções continua disponível para comparação.
+
 ## Testes por trecho e por caso
 
 Uma execução desde o boot leva cerca de uma hora até os objetivos mais distantes. Para iterar mais rápido, o agente salva o estado do jogo e a própria memória em dois momentos, e `zelda_env/segments.py` roda a partir desses pontos.

@@ -118,9 +118,16 @@ def capture(directory, session, replace=False):
 def play(label, session, args, *, state=None, memory=None, until=None, until_room=None, decisions=200,
          no_drops=False):
     """Run the agent once from a saved point to a target and return what happened."""
-    command = [sys.executable, "-m", "zelda_env.agent", "--headless", "--fresh",
-               "--decisions", str(decisions), "--policy", args.policy,
-               "--directory", str(session), "--rom", str(args.rom)]
+    micro = getattr(args, "mode", "options") == "micro"
+    if micro:
+        # Button-level play: no option survey, no agent memory. The budget counts inputs.
+        command = [sys.executable, "-m", "zelda_env.micro", "--headless", "--steps", str(decisions),
+                   "--directory", str(session), "--rom", str(args.rom)]
+        memory = None
+    else:
+        command = [sys.executable, "-m", "zelda_env.agent", "--headless", "--fresh",
+                   "--decisions", str(decisions), "--policy", args.policy,
+                   "--directory", str(session), "--rom", str(args.rom)]
     if args.data_dir:
         command += ["--data-dir", str(args.data_dir)]
     if getattr(args, "no_supervisor", False):
@@ -149,6 +156,7 @@ def play(label, session, args, *, state=None, memory=None, until=None, until_roo
         return {"test": label, "status": "erro", "log": str(session / "agent.log")}
     result = {"test": label, **metrics(trace), "seconds": round(time.perf_counter() - started),
               "target": until or until_room, "budget": decisions, "policy": args.policy,
+              "mode": getattr(args, "mode", "options"),
               "supervisor": False if getattr(args, "no_supervisor", False) else (getattr(args, "supervisor", None) or "padrão"),
               "commit": revision(), "when": datetime.now().isoformat(timespec="seconds")}
     result["status"] = verdict(result, until, until_room, no_drops)
@@ -318,6 +326,8 @@ def main():
     casing.add_argument("case")
     for sub in (running, casing):
         sub.add_argument("--policy", choices=("laya", "random", "shortest"), default="laya")
+        sub.add_argument("--mode", choices=("options", "micro"), default="options",
+                         help="options: o agente lista o que dá para fazer. micro: o Laya aperta um botão por vez")
         sub.add_argument("--supervisor", metavar="MODELO", help="Modelo Ollama do supervisor. Padrão: o do agente")
         sub.add_argument("--no-supervisor", action="store_true",
                          help="Roda sem o supervisor, para comparação")
