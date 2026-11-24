@@ -1,5 +1,7 @@
 # ADR 0001: o Laya escolhe entre opções descobertas por simulação, e a memória impede loops
 
+> Este ADR descreve a linha de base com opções (`zelda_env/agent.py`). O desenho do agente está no [ADR 0002](0002-laya-aperta-um-botao-por-vez.md).
+
 - **Status:** aceito
 - **Data:** 20 de novembro de 2026, com revisão no mesmo dia (luta, itens, camadas e contexto curto)
 - **Contexto de execução:** Oracle of Ages US no PyBoy 2.8.1, Laya 0.5.0 local em CPU

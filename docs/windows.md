@@ -71,21 +71,21 @@ Instale o Laya e baixe os pesos uma vez, com rede. Depois disso o agente roda of
 Rodar o agente:
 
 ```powershell
-.\.venv\Scripts\python.exe -m zelda_env.agent                        # com janela
-.\.venv\Scripts\python.exe -m zelda_env.agent --headless --decisions 300
-.\.venv\Scripts\python.exe -m zelda_env.agent --fresh                # recomeça do seed
+.\.venv\Scripts\python.exe -m zelda_env.player                       # com janela
+.\.venv\Scripts\python.exe -m zelda_env.player --headless --steps 600
+.\.venv\Scripts\python.exe -m zelda_env.agent --headless --decisions 300   # linha de base com opções
 ```
 
 No Windows o Laya roda em CPU (`--device cpu`, o padrão). A opção `mps` existe só no macOS.
 
-A sessão fica em `output\agent\`: `latest.state` e `memory.json` para retomar, `trace.jsonl` com uma linha por decisão e `summary.json` com o resumo.
+A sessão do agente fica em `output\player\`, com `trace.jsonl` de uma linha por input e `summary.json` com o resumo. A linha de base grava em `output\agent\`.
 
 ## Testes por trecho
 
 ```powershell
 .\.venv\Scripts\python.exe -m zelda_env.segments list
 .\.venv\Scripts\python.exe -m zelda_env.segments capture output\agent
-.\.venv\Scripts\python.exe -m zelda_env.segments run chave-do-cemiterio --decisions 150
+.\.venv\Scripts\python.exe -m zelda_env.segments run espada --decisions 600
 ```
 
 Veja [Testes por trecho e por caso](validation-agent.md#testes-por-trecho-e-por-caso) para o que cada comando faz.
@@ -96,8 +96,8 @@ O supervisor fica ligado por padrão. Instale o [Ollama para Windows](https://ol
 
 ```powershell
 ollama pull gemma3:4b
-.\.venv\Scripts\python.exe -m zelda_env.agent
-.\.venv\Scripts\python.exe -m zelda_env.agent --no-supervisor
+.\.venv\Scripts\python.exe -m zelda_env.player
+.\.venv\Scripts\python.exe -m zelda_env.player --no-supervisor
 ```
 
 Sem o Ollama ou sem os pesos, o agente avisa e roda sem supervisor.

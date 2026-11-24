@@ -294,36 +294,29 @@ A busca de empurrões também vale para a caverna do passado. O trecho `maku-tre
 
 A lista completa de passos da dungeon está em [research-mecanicas-ages.md](research-mecanicas-ages.md).
 
-## Modo micro: o Laya aperta um botão por vez
+## O agente: o Laya aperta um botão por vez
 
-O agente por opções decide pouco com os modelos. Na dungeon 1, 41 de 64 decisões de uma rodada foram regra do agente e 7 foram do Laya: o código simula a sala, lista o que dá para fazer, resolve os blocos e simula as lutas. O modo micro (`zelda_env/micro.py`) tira isso do caminho da decisão.
+No agente (`zelda_env/player.py`), o supervisor lê o estado em texto e escreve a meta do momento, e o Laya aperta um botão por input: cima, baixo, esquerda, direita, A ou B. O código só lê o jogo e aperta o botão escolhido. O desenho está no [ADR 0002](adr/0002-laya-aperta-um-botao-por-vez.md).
 
-| Papel | Modo opções | Modo micro |
-| --- | --- | --- |
-| Laya | Escolhe entre opções prontas | Escolhe um botão por input: cima, baixo, esquerda, direita, A ou B |
-| Supervisor | Desempata | Lê o estado em texto e escreve a meta curta do momento |
-| Código | Simula a sala, lista opções, resolve blocos e lutas, corta ciclos | Lê o jogo, monta o texto e aperta o botão escolhido |
-
-O supervisor recebe só texto: o que o objetivo pede em uma frase, a sala, a posição de Link, um mapa da tela em caracteres lido da memória do jogo, os lados por onde a tela pode ser deixada, a vida, os últimos inputs e as metas que não mudaram nada naquela tela. Nada é simulado à frente e nenhuma regra corta ciclos.
+As seções anteriores deste documento medem a linha de base com opções (`zelda_env/agent.py`), em que o código simula a sala e lista o que dá para fazer. Em uma rodada dela na dungeon 1, de 64 decisões, 41 foram regra do código, 9 foram rota e 7 foram do Laya.
 
 ```
-python -m zelda_env.micro --headless --steps 600 --until espada
-python -m zelda_env.segments run espada --mode micro --decisions 600
+python -m zelda_env.player --headless --steps 600 --until espada
+python -m zelda_env.segments run espada --decisions 600
 ```
 
-Primeira medição, no trecho `espada` (do boot até a espada), com `gemma3:4b` como supervisor:
+Medição no trecho `espada` (do início do jogo até a espada), com `gemma3:4b` como supervisor:
 
-| Medida | Modo opções | Modo micro |
+| Medida | Agente | Linha de base com opções |
 | --- | --- | --- |
-| Resultado | Passou | Não concluiu |
-| Orçamento usado | 23 decisões | 600 inputs |
-| Salas visitadas | 14 | 4 |
-| Maior trecho repetitivo | 4 | 94 |
-| Tempo | 5 minutos | 7 minutos |
+| Resultado | Não concluiu | Concluiu |
+| Orçamento usado | 600 inputs | 23 decisões |
+| Telas visitadas | 4 | 14 |
+| Maior trecho repetitivo | 32 | 4 |
+| Inputs contra uma parede | 232 de 600 | não se aplica |
+| Tempo | 7 minutos | 5 minutos |
 
-No modo micro Link foi para o norte por três telas, como o caminho pede, abriu um diálogo e depois ficou parado: o supervisor repetiu a mesma meta e o Laya apertou A 88 vezes no mesmo lugar. Com `qwen2.5:7b` como supervisor, em 150 inputs Link não saiu da primeira tela.
-
-Este é o ponto de partida do modo micro. O modo opções continua disponível para comparação.
+O agente sobe três telas, passa pelo primeiro diálogo e depois fica indo e voltando entre as telas `00:6a` e `00:5a`. A tabela de ajustes testados está no ADR 0002.
 
 ## Testes por trecho e por caso
 

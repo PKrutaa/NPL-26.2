@@ -1,16 +1,14 @@
 """Record a silent demo video of the agent playing, with its decisions and key presses.
 
-The left side is the game. The right side shows the objective, the options the survey
-found, which one was chosen and who chose it (Laya, the supervisor or a rule of the
-agent), and the buttons being pressed.
+The left side is the game. The right side shows the objective, the goal the supervisor
+wrote, the button Laya picked with the chance it gave to each one, and the buttons being
+pressed.
 
   python scripts/demo_video.py --out output/demo/laya.mp4 \\
-      --clip "Cubo, chave e porta trancada" output/segments/cases/chave-pequena/start.state 14 \\
-      --clip "Mini-chefe Giant Ghini" output/segments/cases/giant-ghini/start.state 12
+      --play "Do início do jogo, um botão por vez" output/inicio.state 280
 
-Each --clip is a title, a saved state and a number of decisions, played by the options
-agent. Each --micro is the same for micro mode (one button per input). The memory file next to
-the state (start.memory.json or <name>.memory.json) is used when it exists. Needs ffmpeg.
+Each --play is a title, a saved state and a number of inputs. --clip records the options
+baseline instead (title, state, decisions). Needs ffmpeg.
 """
 
 import argparse
@@ -222,14 +220,14 @@ def play(recorder, args, title, state, decisions, policy, supervisor):
         surveyor.close()
 
 
-def play_micro(recorder, args, title, state, steps, policy, planner):
-    """Micro mode: the supervisor writes the goal and Laya presses one button per input."""
+def play_buttons(recorder, args, title, state, steps, policy, planner):
+    """The agent: the supervisor writes the goal and Laya presses one button per input."""
     from zelda_env.agent import OBJECTIVES
-    from zelda_env.micro import WHAT_FOR, MicroAgent
+    from zelda_env.player import WHAT_FOR, Player
 
     with state.open("rb") as stream:
         recorder._pyboy.load_state(stream)
-    agent = MicroAgent(recorder, policy, planner, objectives=OBJECTIVES)
+    agent = Player(recorder, policy, planner, objectives=OBJECTIVES)
     recorder.panel = {"title": title, "lines": [("dim", "O supervisor lê o estado em texto e escreve a meta.")]}
     recorder._pyboy.tick(1, True, False)
     recorder.frame(repeat=45)
@@ -241,17 +239,16 @@ def play_micro(recorder, args, title, state, steps, policy, planner):
         seen, hearts = observe(recorder._pyboy), health(recorder._pyboy)
         answer = details.get("answer") if isinstance(details, dict) else None
         odds = (answer or {}).get("probabilities") or {}
-        lines = [("dim", f"input {agent.steps + 1}  ·  sala {seen.room}  ·  vida {hearts[0] / 4:g} de {hearts[1] / 4:g}"),
+        before = f"  ·  anterior: {agent.recent[-1]}" if agent.recent else ""
+        lines = [("dim", f"input {agent.steps + 1}  ·  sala {seen.room}  ·  vida {hearts[0] / 4:g} de {hearts[1] / 4:g}{before}"),
                  ("accent", f"Objetivo: {WHAT_FOR.get(agent.objective(), '')}"),
                  ("dim", "Meta escrita pelo supervisor:"), ("chosen", agent.goal or "")]
         if agent.reason:
-            lines.append(("text", f"“{agent.reason}”"))
+            lines.append(("dim", f"“{agent.reason}”"))  # small type: it must not push the buttons down
         lines.append(("dim", "Botão escolhido pelo Laya:"))
         for name in criteria:
             chance = f"  {odds[name] * 100:.0f}%" if name in odds else ""
             lines.append(("chosen" if name == key else "option", f"{'>' if name == key else ' '} {names.get(name, name)}{chance}"))
-        if agent.recent:
-            lines.append(("dim", f"Input anterior: {agent.recent[-1]}"))
         recorder.panel["lines"] = lines
         fresh_goal = agent.goal != shown["goal"]
         shown["goal"] = agent.goal
@@ -273,10 +270,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--rom", type=Path)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--play", nargs=3, action="append", default=[], metavar=("TITULO", "ESTADO", "INPUTS"),
+                        help="Clipe do agente: um botão por input")
     parser.add_argument("--clip", nargs=3, action="append", default=[], metavar=("TITULO", "ESTADO", "DECISOES"),
-                        help="Clipe no modo opções")
-    parser.add_argument("--micro", nargs=3, action="append", default=[], metavar=("TITULO", "ESTADO", "INPUTS"),
-                        help="Clipe no modo micro: um botão por input")
+                        help="Clipe da linha de base com opções")
     parser.add_argument("--every", type=int, default=3, help="Um quadro de vídeo a cada N quadros do jogo")
     parser.add_argument("--pause", type=int, default=24, help="Quadros de vídeo parados em cada decisão")
     parser.add_argument("--supervisor", default=None, help="Modelo Ollama. Padrão: o do agente")
@@ -313,12 +310,12 @@ def main():
     try:
         for title, state, decisions in args.clip:
             play(recorder, args, title, Path(state), int(decisions), policy, supervisor)
-        if args.micro:
-            from zelda_env.micro import Planner
+        if args.play:
+            from zelda_env.player import Planner
 
             planner = Planner(supervisor.backend) if supervisor else None
-            for title, state, inputs in args.micro:
-                play_micro(recorder, args, title, Path(state), int(inputs), policy, planner)
+            for title, state, inputs in args.play:
+                play_buttons(recorder, args, title, Path(state), int(inputs), policy, planner)
     finally:
         encoder.stdin.close()
         encoder.wait()

@@ -217,7 +217,25 @@ No benchmark, `--lookahead` mostra o efeito próximo de cada direção ao modelo
 
 ## Laya jogando sozinho
 
-O modo agente não usa rotas escritas à mão. Ele parte do seed do boot e repete este ciclo:
+Dois modelos locais jogam, e o código só lê o jogo e aperta o botão escolhido:
+
+1. **Supervisor.** Um LLM pequeno (`gemma3:4b`, no Ollama) lê o estado em texto: o que o objetivo pede, a sala, um mapa da tela em caracteres, a vida e os últimos inputs. Ele escreve a meta do momento em poucas palavras, como `Walk up to the character`.
+2. **Laya.** Lê a meta e escolhe um botão por input: cima, baixo, esquerda, direita, A ou B.
+3. **Execução.** O código aperta o botão, espera enquanto o jogo está no controle e monta o texto do passo seguinte. Ele não simula nada à frente, não lista ações e não corta ciclos.
+
+```bash
+.venv/bin/python -m zelda_env.player                          # com janela
+.venv/bin/python -m zelda_env.player --headless --steps 600 --until espada
+.venv/bin/python -m zelda_env.segments run espada --decisions 600
+```
+
+A sessão fica em `output/player/`, com um `trace.jsonl` de uma linha por input (meta em vigor, botão, confiança do Laya e resultado) e uma linha por meta nova, com o motivo do supervisor.
+
+O agente ainda entra em ciclos e não conclui o primeiro trecho do jogo. O [ADR 0002](docs/adr/0002-laya-aperta-um-botao-por-vez.md) explica o desenho e traz as medições.
+
+### Linha de base com opções
+
+`zelda_env.agent` é a linha de base de comparação. Nela o código faz a maior parte do trabalho:
 
 1. **Levantamento.** Uma cópia headless do emulador testa movimentos a partir do estado atual e lista o que é possível na sala: saídas, conversas, objetos que podem ser empurrados, uso de item em obstáculo ou no chão, luta de espada contra um inimigo e pontos que disparam uma cena.
 2. **Escolha.** O Laya escolhe uma dessas opções. Ele recebe um objetivo curto, como `Go north.`, e opções curtas, como `Go north to a new room` ou `Attack the enemy`. O planner converte a escolha em inputs de controle.
@@ -237,18 +255,6 @@ Os objetivos em `zelda_env/agent.py` são etapas escritas à mão: uma sala de r
 
 Cada decisão registra também a vida de Link. O levantamento descarta rotas que causam dano, e uma decisão que mata Link é desfeita e nunca mais oferecida naquele ponto.
 
-### Modo micro
-
-No modo acima o código descobre o que dá para fazer e o Laya escolhe entre opções prontas. No modo micro a decisão é dos modelos: o supervisor lê o estado em texto e escreve a meta do momento, e o Laya aperta um botão por vez (cima, baixo, esquerda, direita, A ou B). O código só lê o jogo e aperta o botão escolhido.
-
-```bash
-.venv/bin/python -m zelda_env.micro                          # com janela
-.venv/bin/python -m zelda_env.micro --headless --steps 600 --until espada
-.venv/bin/python -m zelda_env.segments run espada --mode micro --decisions 600
-```
-
-O modo micro ainda entra em ciclos e não conclui o primeiro trecho do jogo. O [ADR 0002](docs/adr/0002-modo-micro.md) explica o desenho e traz as medições.
-
 ### Testes por trecho
 
 Para iterar em um trecho do jogo sem rodar desde o boot, o agente salva estado e memória a cada objetivo concluído, e `zelda_env.segments` roda de um desses pontos até o objetivo seguinte:
@@ -256,14 +262,15 @@ Para iterar em um trecho do jogo sem rodar desde o boot, o agente salva estado e
 ```bash
 .venv/bin/python -m zelda_env.segments list
 .venv/bin/python -m zelda_env.segments capture output/agent
-.venv/bin/python -m zelda_env.segments run chave-do-cemiterio --decisions 150
+.venv/bin/python -m zelda_env.segments run espada --decisions 600
+.venv/bin/python -m zelda_env.segments run chave-do-cemiterio --mode options --decisions 150
 ```
 
 Um trecho passa quando o objetivo é concluído sem corte de ciclo e sem impasse. Veja os [detalhes](docs/validation-agent.md#testes-por-trecho-e-por-caso).
 
 ### Supervisor
 
-O supervisor é um LLM pequeno que roda no [Ollama](https://ollama.com) local. Ele fica ligado por padrão, com o modelo `gemma3:4b`. O agente o consulta em três situações:
+O supervisor é um LLM pequeno que roda no [Ollama](https://ollama.com) local, com o modelo `gemma3:4b` por padrão. No agente ele escreve a meta de cada momento. Na linha de base com opções ele só é consultado em três situações:
 
 - o Laya escolheu com confiança abaixo de 0,6, ou seja, quase no empate;
 - não há opção nova em lugar nenhum;
@@ -274,9 +281,9 @@ Ele recebe o objetivo, a sala, a vida, as últimas ações e a lista de opções
 ```bash
 ollama pull gemma3:4b             # uma vez, com rede
 ollama serve                      # se o servidor não estiver rodando
-.venv/bin/python -m zelda_env.agent                           # com supervisor
-.venv/bin/python -m zelda_env.agent --supervisor qwen2.5:7b   # outro modelo
-.venv/bin/python -m zelda_env.agent --no-supervisor           # sem supervisor
+.venv/bin/python -m zelda_env.player                          # com supervisor
+.venv/bin/python -m zelda_env.player --supervisor qwen2.5:7b  # outro modelo
+.venv/bin/python -m zelda_env.player --no-supervisor          # sem metas do supervisor, para comparação
 ```
 
 Sem o servidor ou sem os pesos, o agente avisa e roda sem supervisor. Cada decisão do supervisor aparece no `trace.jsonl` com a origem `supervisor` e o motivo que ele deu. Veja as [medições](docs/validation-agent.md).
@@ -336,6 +343,6 @@ A janela de jogo usa o teclado do PyBoy e avança um frame por `tick()`. O smoke
 
 O agente vai sozinho do boot até entrar na primeira dungeon: oito objetivos em 293 decisões, sem corte de ciclo, sem impasse e sem morte (execução 10 da [validação](docs/validation-agent.md)). Dentro da dungeon ainda faltam chefes, projéteis e recuperação de corações. A validação em máquinas Windows e Linux reais também está pendente.
 
-O [ADR 0001](docs/adr/0001-agente-por-opcoes-com-memoria.md) explica como o agente funciona e o que ele não cobre. O [ADR 0002](docs/adr/0002-modo-micro.md) explica o modo micro, em que o Laya aperta um botão por vez. A [validação do agente](docs/validation-agent.md) traz os números e o estado de cada item da spec. A [proposta de arquitetura](docs/architecture-brainstorm.md) registra o desenho original. A [pesquisa sobre Oracle of Ages](docs/research-oracle-of-ages.md) reúne as referências para a leitura de memória.
+O [ADR 0002](docs/adr/0002-laya-aperta-um-botao-por-vez.md) explica como o agente funciona. O [ADR 0001](docs/adr/0001-agente-por-opcoes-com-memoria.md) descreve a linha de base com opções. A [validação do agente](docs/validation-agent.md) traz os números e o estado de cada item da spec. A [proposta de arquitetura](docs/architecture-brainstorm.md) registra o desenho original. A [pesquisa sobre Oracle of Ages](docs/research-oracle-of-ages.md) reúne as referências para a leitura de memória.
 
 Referências: [API PyBoy](https://docs.pyboy.dk/api/pyboy.html), [controles PyBoy](https://docs.pyboy.dk/wiki/development/getting-started.html), [disassembly](https://github.com/Stewmath/oracles-disasm), [WLA-DX](https://github.com/vhelin/wla-dx).

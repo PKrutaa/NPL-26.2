@@ -1,15 +1,16 @@
-"""Micro mode: Laya presses one button at a time and the supervisor says what to do.
+"""The agent: Laya presses one button at a time and the supervisor says what to do.
 
-The options agent (zelda_env.agent) finds out what can be done in a room by simulating
-it, and hands Laya ready-made choices. That measures the code more than the models. Here
-the code only reads the game and presses what was chosen:
+The models decide and the code only reads the game and presses what was chosen:
 
 - the supervisor (a local LLM) reads the state as text, with a character map of the
   screen, and writes the goal of the moment in a few words;
 - Laya reads that goal and picks one input: up, down, left, right, A or B;
 - nothing is simulated ahead, no option is listed, no puzzle is solved and no loop is cut.
 
-  python -m zelda_env.micro --headless --steps 600 --until espada
+  python -m zelda_env.player --headless --steps 600 --until espada
+
+zelda_env.agent is the baseline this is compared with: there the code simulates the room
+and hands Laya ready-made choices.
 """
 
 import argparse
@@ -158,7 +159,7 @@ class Planner:
         return goal, reason
 
 
-class MicroAgent:
+class Player:
     def __init__(self, pyboy, policy, planner, *, objectives, watch=False, log=None, history=False):
         self.pyboy, self.policy, self.planner = pyboy, policy, planner
         # With the screen history in the state, the 4B supervisor did worse in the first
@@ -285,7 +286,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     add_common(parser)
     parser.add_argument("--seed-state", type=Path, help="Ponto de partida. Padrão: output/inicio.state")
-    parser.add_argument("--directory", type=Path, help="Sessão (estado, trace). Padrão: output/micro")
+    parser.add_argument("--directory", type=Path, help="Sessão (estado, trace). Padrão: output/player")
     parser.add_argument("--steps", type=int, default=400, help="Orçamento de inputs desta execução")
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--supervisor", metavar="MODELO", default=DEFAULT_SUPERVISOR)
@@ -297,7 +298,7 @@ def main():
     parser.add_argument("--device", choices=("cpu", "mps"), default="cpu")
     args = resolve_common(parser, parser.parse_args())
     start = args.seed_state or paths.output_path("inicio.state")
-    directory = args.directory or paths.output_path("micro")
+    directory = args.directory or paths.output_path("player")
     if not start.is_file():
         parser.exit(1, f"Seed ausente: {start}. Gere com: {paths.venv_python()} -m zelda_env seed\n")
     planner = None
@@ -325,7 +326,7 @@ def main():
             pyboy.load_state(stream)
         print(f"Sessão iniciada de {start}", flush=True)
         with (directory / "trace.jsonl").open("w", encoding="utf-8") as log:
-            agent = MicroAgent(pyboy, policy, planner, objectives=OBJECTIVES, watch=not args.headless, log=log,
+            agent = Player(pyboy, policy, planner, objectives=OBJECTIVES, watch=not args.headless, log=log,
                                history=args.history)
             reason, started = "orçamento de inputs", time.perf_counter()
             guard = 0
@@ -348,7 +349,7 @@ def main():
             pyboy.save_state(stream)
             paths.atomic_write(directory / "latest.state", stream.getvalue())
             report = {**agent.summary(), "stopped": reason, "seconds": round(time.perf_counter() - started, 1),
-                      "mode": "micro", "rom_sha1": paths.AGES_SHA1, "pyboy": version("pyboy"),
+                      "agent": "player", "rom_sha1": paths.AGES_SHA1, "pyboy": version("pyboy"),
                       "python": platform.python_version(), "model": policy.model,
                       "supervisor": getattr(planner.backend, "name", None) if planner else None}
             paths.atomic_write(directory / "summary.json",
