@@ -47,6 +47,7 @@ Por padrão o supervisor só vê o instante: os oito últimos inputs, a última 
 - `--memory`: um diário das seis últimas metas com o que cada uma fez, o mesmo registro guardado por tela (continua lá quando Link sai e volta) e uma nota de até vinte palavras que o supervisor escreve para si mesmo e recebe de volta na chamada seguinte.
 - `--texts`: as falas que o jogo mostrou, lidas da tabela de textos do disassembly quando ele está no cache local.
 - `--history`: as telas visitadas e por onde Link saiu de cada uma.
+- `--reach`: o supervisor diz por quantos inputs a meta vale, de 1 a 8, em vez de oito fixos.
 
 ### O que o Laya recebe
 
@@ -94,6 +95,7 @@ O que cada ajuste mudou, sempre no mesmo trecho:
 | Resposta do supervisor como botão mais finalidade, em formato fixo | Piorou: 200 de 200 inputs contra a parede. Não foi adotado |
 | Memória do supervisor: diário das últimas metas, o que foi tentado em cada tela e uma nota que ele escreve para si mesmo (`--memory`) | Não melhorou: as mesmas 4 telas, 332 inputs contra a parede e mais idas e voltas (107 trocas de tela). Ficou como opção |
 | Falas do jogo no texto do supervisor (`--texts`) | Piorou: 68 metas iguais seguidas e maior trecho repetitivo de 544. Ficou como opção |
+| Meta com alcance: o supervisor diz por quantos inputs a meta vale (`--reach`) | Piorou nos dois modelos. Com `gemma3:4b`, 527 metas iguais ("ande para a direita até o personagem"). Com o de 35B, 114 metas para a esquerda alternadas com 109 para a direita, sempre atrás da personagem que acompanha Link. Ficou como opção |
 | Supervisor `qwen2.5:7b` | Pior: em 150 inputs Link não saiu da primeira tela |
 | Supervisor `qwen3.6:35b-a3b`, sem a fase de raciocínio (`--no-think`), 300 inputs | Não saiu do ciclo: 2 telas, com 18 metas "ande para a direita" alternadas com 17 "ande para a esquerda". Os motivos são mais articulados, mas ele conclui que a saída norte está fechada depois de já ter passado por ela |
 
@@ -101,6 +103,7 @@ O que cada ajuste mudou, sempre no mesmo trecho:
 
 - O agente ainda entra em ciclos e não conclui o primeiro trecho do jogo. Esse é o comportamento medido dos dois modelos.
 - O gargalo medido é o supervisor: ele repete metas que o próprio estado diz que falharam e imagina coisas que não estão no mapa.
+- O ciclo mais frequente tem a mesma origem em todas as variações: depois do primeiro diálogo a personagem Impa acompanha Link, o mapa a mostra como um personagem ao lado dele, e o supervisor manda ir até ela.
 - Trocar o supervisor por um modelo quase nove vezes maior não tirou o agente do ciclo. Isso aponta para o que o supervisor recebe e para o formato da meta, mais do que para o tamanho do modelo: uma meta vale por oito inputs e não diz até onde andar, e o mapa em caracteres não diz por onde há caminho.
 - O que cabe melhorar sem tirar a decisão dos modelos é a percepção em texto, o prompt e o modelo do supervisor. Vários ajustes de prompt pioraram o resultado, então cada um precisa ser medido no mesmo trecho antes de ser adotado.
 - Cada input custa uma chamada ao Laya e, em média, uma chamada ao supervisor a cada cinco inputs. Um trecho de 600 inputs leva cerca de 7 minutos.

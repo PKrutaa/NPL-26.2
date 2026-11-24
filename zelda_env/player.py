@@ -93,6 +93,11 @@ def game_text(index):
     return _TEXTS.get(index)
 
 
+REACH_RULES = (
+    " Also answer 'steps': how many times the button should be pressed before you look at the screen again, "
+    "from 1 to 8. One press walks about one tile, so count the tiles on the map up to the wall, the edge or the "
+    "thing Link is going to. Use 1 for A or B."
+)
 MEMORY_RULES = (
     " You have a memory. 'Journal' lists your last goals and what each one did. 'Tried on this screen' is kept "
     "even after Link leaves and comes back. 'Your note' is what you wrote to yourself last time. Use them: do not "
@@ -173,12 +178,16 @@ class Planner:
         self.think = think  # False turns off the reasoning phase of models that have one
         self.stats = {"calls": 0, "failed": 0, "seconds": 0.0}
         self.note = None  # what the supervisor last wrote to itself
+        self.reach, self.steps = False, PLAN_EVERY  # with reach, the supervisor says how many inputs the goal lasts
 
     def goal(self, state, memory=False):
         """The goal and the reason. With `memory`, the supervisor also writes a note to itself,
         kept in `self.note` and shown to it on the next call."""
         schema = {"type": "object", "properties": {"goal": {"type": "string"}, "reason": {"type": "string"}},
                   "required": ["goal"]}
+        if self.reach:
+            schema["properties"]["steps"] = {"type": "integer", "minimum": 1, "maximum": PLAN_EVERY}
+            schema["required"] = ["goal", "steps"]
         if memory:
             schema["properties"]["note"] = {"type": "string"}
         user = "\n".join(f"{key}:\n{value}" if "\n" in str(value) else f"{key}: {value}"
@@ -190,12 +199,14 @@ class Planner:
                 **({} if self.think is None else {"think": self.think}),
                 "model": self.backend.model, "stream": False, "format": schema, "keep_alive": "30m",
                 "options": {"temperature": 0, "num_predict": 120},
-                "messages": [{"role": "system", "content": SYSTEM + (MEMORY_RULES if memory else "")},
+                "messages": [{"role": "system",
+                              "content": SYSTEM + (REACH_RULES if self.reach else "") + (MEMORY_RULES if memory else "")},
                              {"role": "user", "content": user}],
             }, self.timeout)
             data = json.loads(reply.get("message", {}).get("content", ""))
             goal = " ".join(str(data["goal"]).split())[:120]
             reason = str(data.get("reason", ""))[:200]
+            self.steps = max(1, min(PLAN_EVERY, int(data.get("steps", PLAN_EVERY)))) if self.reach else PLAN_EVERY
             if memory and data.get("note"):
                 self.note = " ".join(str(data["note"]).split())[:200]
         except (OSError, ValueError, KeyError, TypeError):
@@ -303,7 +314,8 @@ class Player:
             execute(self.pyboy, "wait", render=self.watch)
             return
         stuck = self.still and self.still % STUCK_AFTER == 0
-        if self.goal is None or self.goal_age >= PLAN_EVERY or stuck:
+        lasts = self.planner.steps if self.planner else PLAN_EVERY
+        if self.goal is None or self.goal_age >= lasts or stuck:
             if stuck and self.goal and self.goal not in self.failed_goals:
                 self.failed_goals.append(self.goal)
             self.plan(seen, name)
@@ -372,6 +384,8 @@ def main():
     parser.add_argument("--no-think", action="store_true",
                         help="Desliga a fase de raciocínio de modelos que têm uma (sem isso eles devolvem vazio)")
     parser.add_argument("--supervisor-timeout", type=float, default=30.0)
+    parser.add_argument("--reach", action="store_true",
+                        help="O supervisor diz por quantos inputs a meta vale, em vez de oito fixos")
     parser.add_argument("--memory", action="store_true",
                         help="Memória do supervisor: diário das últimas metas, o que foi tentado em cada tela "
                              "e a nota que ele escreve para si mesmo")
@@ -415,6 +429,8 @@ def main():
             agent = Player(pyboy, policy, planner, objectives=OBJECTIVES, watch=not args.headless, log=log,
                                history=args.history)
             agent.memory, agent.texts = args.memory, args.texts
+            if planner:
+                planner.reach = args.reach
             reason, started = "orçamento de inputs", time.perf_counter()
             guard = 0
             try:
