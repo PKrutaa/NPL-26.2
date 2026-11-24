@@ -16,6 +16,7 @@ and hands Laya ready-made choices.
 import argparse
 import json
 import platform
+import re
 import time
 from collections import deque
 from importlib.metadata import version
@@ -62,6 +63,41 @@ SYSTEM = (
     "A goal listed as having changed nothing must not be given again: choose another direction or button. "
     "Prefer walking toward a part of the map Link has not reached, or toward a character, when unsure. "
     'Answer with JSON only: {"goal": "<instruction>", "reason": "<short reason>"}.'
+)
+
+
+_TEXTS = None
+
+
+def game_text(index):
+    """What a text box says, by the game's own text number.
+
+    The words come from the text table of the disassembly that the ROM was built from, when
+    that checkout is on this machine. Without it the supervisor is not told the words.
+    """
+    global _TEXTS
+    if _TEXTS is None:
+        _TEXTS = {}
+        try:
+            import yaml
+
+            source = next(paths.cache_path("rom-build").glob("**/text/ages/text.yaml"))
+            for group in yaml.safe_load(source.read_text(encoding="utf-8"))["groups"]:
+                for entry in group.get("data", ()):
+                    numbers = entry.get("index", ())
+                    words = " ".join(re.sub(r"\\[a-zA-Z]+(\([^)]*\))?", " ", str(entry.get("text", ""))).split())
+                    for number in numbers if isinstance(numbers, list) else [numbers]:
+                        _TEXTS[(group["group"] << 8) | number] = words[:220]
+        except (ImportError, StopIteration, OSError, ValueError, KeyError, TypeError):
+            pass
+    return _TEXTS.get(index)
+
+
+MEMORY_RULES = (
+    " You have a memory. 'Journal' lists your last goals and what each one did. 'Tried on this screen' is kept "
+    "even after Link leaves and comes back. 'Your note' is what you wrote to yourself last time. Use them: do not "
+    "give again a goal that did nothing or that took Link back and forth. In the answer, add a 'note' of at most "
+    "twenty words with what you learned and what to try next."
 )
 
 
@@ -135,10 +171,15 @@ class Planner:
     def __init__(self, backend, timeout=30.0):
         self.backend, self.timeout = backend, timeout
         self.stats = {"calls": 0, "failed": 0, "seconds": 0.0}
+        self.note = None  # what the supervisor last wrote to itself
 
-    def goal(self, state):
+    def goal(self, state, memory=False):
+        """The goal and the reason. With `memory`, the supervisor also writes a note to itself,
+        kept in `self.note` and shown to it on the next call."""
         schema = {"type": "object", "properties": {"goal": {"type": "string"}, "reason": {"type": "string"}},
                   "required": ["goal"]}
+        if memory:
+            schema["properties"]["note"] = {"type": "string"}
         user = "\n".join(f"{key}:\n{value}" if "\n" in str(value) else f"{key}: {value}"
                          for key, value in state.items())
         started = time.perf_counter()
@@ -147,11 +188,14 @@ class Planner:
             reply = self.backend._post("/api/chat", {
                 "model": self.backend.model, "stream": False, "format": schema, "keep_alive": "30m",
                 "options": {"temperature": 0, "num_predict": 120},
-                "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": user}],
+                "messages": [{"role": "system", "content": SYSTEM + (MEMORY_RULES if memory else "")},
+                             {"role": "user", "content": user}],
             }, self.timeout)
             data = json.loads(reply.get("message", {}).get("content", ""))
             goal = " ".join(str(data["goal"]).split())[:120]
             reason = str(data.get("reason", ""))[:200]
+            if memory and data.get("note"):
+                self.note = " ".join(str(data["note"]).split())[:200]
         except (OSError, ValueError, KeyError, TypeError):
             self.stats["failed"] += 1
             goal, reason = None, None
@@ -173,6 +217,11 @@ class Player:
         self.failed_goals = deque(maxlen=4)  # goals that changed nothing on this screen
         # What the supervisor is told about where Link has been. It is history, not a plan.
         self.visits, self.leaves, self.path = {}, {}, deque(maxlen=8)
+        self.said, self.text_index = deque(maxlen=3), None  # what the game's text boxes said lately
+        # The supervisor's memory: its last goals with what each did, the same per screen, and
+        # the note it writes to itself. Everything in it comes from the supervisor's own goals.
+        self.journal, self.by_screen, self.tally = deque(maxlen=6), {}, None
+        self.memory, self.texts = False, False
         self.done = [item[0] for item in objectives if item[3](pyboy)]
         self.inputs = {}
 
@@ -206,17 +255,42 @@ class Player:
                     f"{side} {count}x" for side, count in sorted(self.leaves.get(seen.room, {}).items()))
                 or "never left it",
                 "screens visited lately": " > ".join(self.path) or "only this one"} if self.history else {}),
+            **({"what the game said lately": " / ".join(self.said) or "nothing yet"} if self.texts else {}),
+            **({"journal": "\n".join(self.journal) or "empty",
+                "tried on this screen": "\n".join(self.by_screen.get(seen.room, ())) or "nothing yet",
+                "your note": (self.planner.note if self.planner else None) or "none"} if self.memory else {}),
             "map": screen_map(self.pyboy) or "no map (a scene or a menu)",
         }
-        goal, reason = self.planner.goal(state) if self.planner else (None, None)
+        self.close_goal(seen.room)
+        goal, reason = self.planner.goal(state, self.memory) if self.planner else (None, None)
+        self.tally = {"room": seen.room, "events": {}}
         self.goal = goal or self.goal or "Explore: walk to a part of the screen you have not been to."
         self.reason, self.goal_age = reason, 0
         self.write({"event": "goal", "step": self.steps, "room": seen.room, "goal": self.goal, "reason": reason,
                     "from_supervisor": bool(goal)})
 
+    def close_goal(self, room):
+        """Write down what the goal that just ended did, for the journal."""
+        if not self.tally or not self.goal:
+            return
+        did = ", ".join(f"{event} {count}x" for event, count in sorted(self.tally["events"].items())) or "nothing"
+        where = "" if self.tally["room"] == room else f", ended on screen {room}"
+        line = f"'{self.goal}' on screen {self.tally['room']}: {did}{where}"
+        self.journal.append(line)
+        tried = self.by_screen.setdefault(self.tally["room"], deque(maxlen=5))
+        tried.append(f"'{self.goal}': {did}{where}")
+
     def step(self):
         seen = observe(self.pyboy)
         name = self.objective()
+        if seen.mode == "dialogue":
+            # The player reads the text on screen. The supervisor gets the same words.
+            index = (self.pyboy.memory[0xCBA3] << 8) | self.pyboy.memory[0xCBA2]
+            if index != self.text_index:
+                self.text_index = index
+                words = game_text(index) if self.texts else None
+                if words and words not in self.said:
+                    self.said.append(words)
         # The text box takes a press when a page is full, and in the states where it waits
         # for one before going on. In between it is writing and ignores the buttons.
         writing = (seen.mode == "dialogue" and not seen.dialogue_ready
@@ -252,6 +326,8 @@ class Player:
         self.goal_age += 1
         self.inputs[key] = self.inputs.get(key, 0) + 1
         self.recent.append(f"{key} -> {event}")
+        if self.tally:
+            self.tally["events"][event] = self.tally["events"].get(event, 0) + 1
         if after.room != seen.room and seen.room and after.room:
             self.goal_age = PLAN_EVERY  # a new screen needs a new goal
             self.failed_goals.clear()
@@ -291,6 +367,11 @@ def main():
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--supervisor", metavar="MODELO", default=DEFAULT_SUPERVISOR)
     parser.add_argument("--no-supervisor", action="store_true", help="Sem metas do supervisor (comparação)")
+    parser.add_argument("--memory", action="store_true",
+                        help="Memória do supervisor: diário das últimas metas, o que foi tentado em cada tela "
+                             "e a nota que ele escreve para si mesmo")
+    parser.add_argument("--texts", action="store_true",
+                        help="Passa ao supervisor as falas que o jogo mostrou")
     parser.add_argument("--history", action="store_true",
                         help="Inclui no texto do supervisor as telas visitadas e por onde Link saiu de cada uma")
     parser.add_argument("--until", metavar="OBJETIVO", choices=[item[0] for item in OBJECTIVES])
@@ -328,6 +409,7 @@ def main():
         with (directory / "trace.jsonl").open("w", encoding="utf-8") as log:
             agent = Player(pyboy, policy, planner, objectives=OBJECTIVES, watch=not args.headless, log=log,
                                history=args.history)
+            agent.memory, agent.texts = args.memory, args.texts
             reason, started = "orçamento de inputs", time.perf_counter()
             guard = 0
             try:

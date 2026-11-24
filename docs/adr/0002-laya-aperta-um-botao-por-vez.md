@@ -40,6 +40,14 @@ Só texto, lido da memória do jogo naquele instante:
 
 Ele devolve uma meta de até doze palavras, que começa por `Walk up`, `Walk down`, `Walk left`, `Walk right`, `Press A` ou `Press B`, e o motivo. Uma meta nova é pedida a cada oito inputs, quando a tela muda e a cada quatro inputs sem efeito.
 
+### Memória do supervisor
+
+Por padrão o supervisor só vê o instante: os oito últimos inputs, a última meta e as metas que não mudaram nada na tela atual. Três acréscimos existem como opção, desligados porque não melhoraram a medição:
+
+- `--memory`: um diário das seis últimas metas com o que cada uma fez, o mesmo registro guardado por tela (continua lá quando Link sai e volta) e uma nota de até vinte palavras que o supervisor escreve para si mesmo e recebe de volta na chamada seguinte.
+- `--texts`: as falas que o jogo mostrou, lidas da tabela de textos do disassembly quando ele está no cache local.
+- `--history`: as telas visitadas e por onde Link saiu de cada uma.
+
 ### O que o Laya recebe
 
 A meta do supervisor, para onde Link olha e o que está ao lado dele. Com isso escolhe um dos seis botões. Durante um texto do jogo, as escolhas são A e B.
@@ -84,6 +92,8 @@ O que cada ajuste mudou, sempre no mesmo trecho:
 | Histórico de telas visitadas no texto do supervisor | Piorou: Link andou para a esquerda e para a direita na mesma tela por 440 inputs. Ficou como opção (`--history`) |
 | Legenda só com os símbolos presentes e marca de quem segue Link | Piorou: 380 inputs contra a parede na primeira tela. Não foi adotado |
 | Resposta do supervisor como botão mais finalidade, em formato fixo | Piorou: 200 de 200 inputs contra a parede. Não foi adotado |
+| Memória do supervisor: diário das últimas metas, o que foi tentado em cada tela e uma nota que ele escreve para si mesmo (`--memory`) | Não melhorou: as mesmas 4 telas, 332 inputs contra a parede e mais idas e voltas (107 trocas de tela). Ficou como opção |
+| Falas do jogo no texto do supervisor (`--texts`) | Piorou: 68 metas iguais seguidas e maior trecho repetitivo de 544. Ficou como opção |
 | Supervisor `qwen2.5:7b` | Pior: em 150 inputs Link não saiu da primeira tela |
 
 ## Consequências
