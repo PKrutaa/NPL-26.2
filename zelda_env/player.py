@@ -168,8 +168,9 @@ def around(pyboy):
 class Planner:
     """Asks the supervisor for the goal of the moment. Never raises."""
 
-    def __init__(self, backend, timeout=30.0):
+    def __init__(self, backend, timeout=30.0, think=None):
         self.backend, self.timeout = backend, timeout
+        self.think = think  # False turns off the reasoning phase of models that have one
         self.stats = {"calls": 0, "failed": 0, "seconds": 0.0}
         self.note = None  # what the supervisor last wrote to itself
 
@@ -186,6 +187,7 @@ class Planner:
         self.stats["calls"] += 1
         try:
             reply = self.backend._post("/api/chat", {
+                **({} if self.think is None else {"think": self.think}),
                 "model": self.backend.model, "stream": False, "format": schema, "keep_alive": "30m",
                 "options": {"temperature": 0, "num_predict": 120},
                 "messages": [{"role": "system", "content": SYSTEM + (MEMORY_RULES if memory else "")},
@@ -367,6 +369,9 @@ def main():
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--supervisor", metavar="MODELO", default=DEFAULT_SUPERVISOR)
     parser.add_argument("--no-supervisor", action="store_true", help="Sem metas do supervisor (comparação)")
+    parser.add_argument("--no-think", action="store_true",
+                        help="Desliga a fase de raciocínio de modelos que têm uma (sem isso eles devolvem vazio)")
+    parser.add_argument("--supervisor-timeout", type=float, default=30.0)
     parser.add_argument("--memory", action="store_true",
                         help="Memória do supervisor: diário das últimas metas, o que foi tentado em cada tela "
                              "e a nota que ele escreve para si mesmo")
@@ -388,7 +393,7 @@ def main():
         try:
             backend.check()
             backend.warm()
-            planner = Planner(backend)
+            planner = Planner(backend, timeout=args.supervisor_timeout, think=False if args.no_think else None)
             print(f"Supervisor ligado: {backend.name}", flush=True)
         except SupervisorUnavailable as error:
             print(f"Supervisor desligado: {error}", flush=True)
