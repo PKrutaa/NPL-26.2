@@ -51,6 +51,7 @@ Por padrão o supervisor só vê o instante: os oito últimos inputs, a última 
 - `--guide`: um parágrafo de guia sobre o objetivo atual, que o supervisor pode seguir ou não. Só o trecho `espada` tem guia escrito.
 - `--followers`: o personagem que continua ao lado de Link depois de ele andar três vezes aparece no mapa como `f`.
 - `--walk-to`: o supervisor escolhe uma casa do mapa e o que fazer ao chegar (parar, apertar A ou B, sair por um lado). O código calcula o caminho sobre o mapa em caracteres e dá ao Laya a direção do próximo passo. É a única opção em que o código decide a direção, por isso fica fora do padrão.
+- `--repeats`: quantas vezes o último texto do jogo foi mostrado.
 - `--paths`: os lados da tela a que dá para chegar andando de onde Link está, por um preenchimento sobre o mapa em caracteres.
 
 ### O que o Laya recebe
@@ -107,6 +108,10 @@ O que cada ajuste mudou, sempre no mesmo trecho:
 | O mesmo guia com `qwen3.6:35b-a3b`, 400 inputs | Melhorou para esse modelo, de 2 para 4 telas, e parou no mesmo ponto das outras variações: não vai para o oeste na quarta tela |
 | Destino em vez de direção (`--walk-to`): o supervisor escolhe uma casa do mapa e o que fazer lá, e o código anda um passo por input até ela, com `gemma3:4b` | Piorou: ele escolheu a casa ao lado de Link com "aperte A" 595 vezes e Link não saiu da primeira tela |
 | O mesmo, com `qwen3.6:35b-a3b` e o guia | Chegou à quarta tela em 47 inputs, o trecho mais rápido medido. Depois escolheu "aperte A" ao lado da Impa 110 vezes: ela acompanha Link e cada A reabre a fala. Maior trecho repetitivo de 553 |
+| Dizer ao supervisor quantas vezes o último texto do jogo foi mostrado (`--repeats`), com `--walk-to`, o guia e `qwen3.6:35b-a3b` | Sem efeito: os mesmos 546 "aperte A" na quarta tela. A causa era do código: a meta dada com o texto aberto continuava valendo depois de ele fechar, e o A seguinte reabria o texto |
+| A meta termina quando o texto fecha, mesma configuração | Melhorou: Link chegou à quinta tela (`00:59`, a oeste, que é o caminho certo) no input 380. É a primeira variação a passar da quarta tela. Depois escolheu "aperte A" em uma casa ao lado da Impa 217 vezes sem efeito |
+| A meta termina quando o texto fecha, `gemma3:4b` padrão | 3 telas, maior trecho repetitivo de 7: Link anda para a esquerda e para a direita atrás da personagem que o acompanha (455 dos 600 inputs) |
+| O mesmo, `gemma3:4b` com `--walk-to --repeats` | Igual a antes: "aperte A" na casa ao lado 588 vezes, na primeira tela |
 | Supervisor `qwen2.5:7b` | Pior: em 150 inputs Link não saiu da primeira tela |
 | Supervisor `qwen3.6:35b-a3b`, sem a fase de raciocínio (`--no-think`), 300 inputs | Não saiu do ciclo: 2 telas, com 18 metas "ande para a direita" alternadas com 17 "ande para a esquerda". Os motivos são mais articulados, mas ele conclui que a saída norte está fechada depois de já ter passado por ela |
 
@@ -116,7 +121,7 @@ O que cada ajuste mudou, sempre no mesmo trecho:
 - O gargalo medido é o supervisor: ele repete metas que o próprio estado diz que falharam e imagina coisas que não estão no mapa.
 - O ciclo mais frequente tem a mesma origem em todas as variações: depois do primeiro diálogo a personagem Impa acompanha Link, o mapa a mostra como um personagem ao lado dele, e o supervisor manda ir até ela.
 - Trocar o supervisor por um modelo quase nove vezes maior não tirou o agente do ciclo. Isso aponta para o que o supervisor recebe e para o formato da meta, mais do que para o tamanho do modelo: uma meta vale por oito inputs e não diz até onde andar, e o mapa em caracteres não diz por onde há caminho.
-- Quinze variações de percepção, memória, conhecimento do jogo, formato da meta e modelo foram medidas no mesmo trecho. Nenhuma superou a versão em uso, e nenhuma concluiu o trecho.
+- Dezenove variações de percepção, memória, conhecimento do jogo, formato da meta e modelo foram medidas no mesmo trecho. Nenhuma concluiu o trecho. A que foi mais longe usa o supervisor de 35B com destino, guia e contagem de textos repetidos: cinco telas.
 - O que cabe melhorar sem tirar a decisão dos modelos é a percepção em texto, o prompt e o modelo do supervisor. Vários ajustes de prompt pioraram o resultado, então cada um precisa ser medido no mesmo trecho antes de ser adotado.
 - Cada input custa uma chamada ao Laya e, em média, uma chamada ao supervisor a cada cinco inputs. Um trecho de 600 inputs leva cerca de 7 minutos.
 

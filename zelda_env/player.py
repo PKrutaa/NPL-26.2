@@ -334,6 +334,8 @@ class Player:
         self.memory, self.texts = False, False
         self.mark_followers, self.paths = False, False
         self.guide = False
+        # How often each text box was opened, so the supervisor can be told a text is a repeat.
+        self.repeats, self.shown, self.talking, self.last_text = False, {}, False, None
         self.leaving = False  # walking off the screen from the place the supervisor chose
         self.near, self.followers = {}, set()  # slot -> walks it stayed next to Link; slots that follow him
         self.done = [item[0] for item in objectives if item[3](pyboy)]
@@ -370,6 +372,10 @@ class Player:
                     f"{side} {count}x" for side, count in sorted(self.leaves.get(seen.room, {}).items()))
                 or "never left it",
                 "screens visited lately": " > ".join(self.path) or "only this one"} if self.history else {}),
+            **({"the last text the game showed": (
+                "none yet" if self.last_text is None else
+                f"shown {self.shown[self.last_text]} times so far, the same words every time"
+                if self.shown[self.last_text] > 1 else "shown once, it was new")} if self.repeats else {}),
             **({"what the game said lately": " / ".join(self.said) or "nothing yet"} if self.texts else {}),
             **({"journal": "\n".join(self.journal) or "empty",
                 "tried on this screen": "\n".join(self.by_screen.get(seen.room, ())) or "nothing yet",
@@ -405,11 +411,20 @@ class Player:
         if seen.mode == "dialogue":
             # The player reads the text on screen. The supervisor gets the same words.
             index = (self.pyboy.memory[0xCBA3] << 8) | self.pyboy.memory[0xCBA2]
+            if not self.talking:
+                self.shown[index] = self.shown.get(index, 0) + 1
+                self.last_text = index
             if index != self.text_index:
                 self.text_index = index
                 words = game_text(index) if self.texts else None
                 if words and words not in self.said:
                     self.said.append(words)
+        if self.talking and seen.mode != "dialogue":
+            # The text closed. A goal given while it was open was about the text, so it ends here.
+            self.goal_age = 99
+            if self.planner:
+                self.planner.destination = None
+        self.talking = seen.mode == "dialogue"
         # The text box takes a press when a page is full, and in the states where it waits
         # for one before going on. In between it is writing and ignores the buttons.
         writing = (seen.mode == "dialogue" and not seen.dialogue_ready
@@ -528,6 +543,8 @@ def main():
                         help="Dá ao supervisor o texto de um guia sobre o objetivo atual")
     parser.add_argument("--followers", action="store_true",
                         help="Marca no mapa, com f, o personagem que acompanha Link")
+    parser.add_argument("--repeats", action="store_true",
+                        help="tell the supervisor how many times the last text box was shown")
     parser.add_argument("--paths", action="store_true",
                         help="Diz ao supervisor a que lados da tela dá para chegar andando de onde Link está")
     parser.add_argument("--reach", action="store_true",
@@ -576,6 +593,7 @@ def main():
                                history=args.history)
             agent.memory, agent.texts = args.memory, args.texts
             agent.mark_followers, agent.paths = args.followers, args.paths
+            agent.repeats = args.repeats
             agent.guide = args.guide
             if planner:
                 planner.reach = args.reach
