@@ -56,3 +56,12 @@ def test_next_step_is_consistent_along_a_path():
         dx, dy = player.puzzle.STEP[way]
         cell = (cell[0] + dx, cell[1] + dy)
     assert cell == (2, 0) and len(seen) == 4  # never steps back
+
+
+def test_side_of_names_the_direction_of_a_touching_cell():
+    from zelda_env.player import side_of
+
+    assert side_of((9, 2), (9, 3)) == "down"
+    assert side_of((9, 2), (8, 2)) == "left"
+    assert side_of((9, 2), (9, 2)) is None
+    assert side_of((9, 2), (9, 5)) is None

@@ -313,6 +313,12 @@ def next_step(lines, start, target):
     return None
 
 
+def side_of(start, target):
+    """The direction of `target` from `start` when the two cells touch, else None."""
+    step = (target[0] - start[0], target[1] - start[1])
+    return next((name for name, move in puzzle.STEP.items() if move == step), None)
+
+
 class Player:
     def __init__(self, pyboy, policy, planner, *, objectives, watch=False, log=None, history=False):
         self.pyboy, self.policy, self.planner = pyboy, policy, planner
@@ -466,6 +472,9 @@ class Player:
             elif then.startswith("leave"):
                 self.leaving = True
                 context["goal"] = f"{PHRASE_WALK[SIDE_KEY[then.split()[1]]]} to leave the screen."
+            elif then.startswith("press") and side_of(here, target) not in (None, seen.facing):
+                # Link is next to the thing but looks elsewhere: a step toward it turns him to it.
+                context["goal"] = f"{PHRASE_WALK[side_of(here, target)]} to face the place the guide chose."
             else:
                 if then.startswith("press"):
                     context["goal"] = f"Press {then.split()[1]} now."

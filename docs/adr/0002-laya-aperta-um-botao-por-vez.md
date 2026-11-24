@@ -112,6 +112,9 @@ O que cada ajuste mudou, sempre no mesmo trecho:
 | A meta termina quando o texto fecha, mesma configuração | Melhorou: Link chegou à quinta tela (`00:59`, a oeste, que é o caminho certo) no input 380. É a primeira variação a passar da quarta tela. Depois escolheu "aperte A" em uma casa ao lado da Impa 217 vezes sem efeito |
 | A meta termina quando o texto fecha, `gemma3:4b` padrão | 3 telas, maior trecho repetitivo de 7: Link anda para a esquerda e para a direita atrás da personagem que o acompanha (455 dos 600 inputs) |
 | O mesmo, `gemma3:4b` com `--walk-to --repeats` | Igual a antes: "aperte A" na casa ao lado 588 vezes, na primeira tela |
+| Com `--walk-to`, Link vira para o destino antes de apertar o botão, `qwen3.6:35b-a3b` com guia e `--repeats` | Não melhorou: 4 telas. O ciclo da quinta tela sumiu e apareceu outro: o supervisor escolhe como destino a personagem que acompanha Link, ela troca de lado a cada passo, e ele alterna "vire para cima" e "vire para baixo" por cerca de 540 inputs |
+| O mesmo, somando `--followers` | Não melhorou: 4 telas, 83 trocas entre `00:6a` e `00:5a`. Na quarta tela ele tenta sair pelo norte, que está fechado, em vez de ir para o oeste como o guia diz |
+| O mesmo, `gemma3:4b` com `--walk-to --repeats` | Igual: "aperte A" na casa ao lado 588 vezes, na primeira tela |
 | Supervisor `qwen2.5:7b` | Pior: em 150 inputs Link não saiu da primeira tela |
 | Supervisor `qwen3.6:35b-a3b`, sem a fase de raciocínio (`--no-think`), 300 inputs | Não saiu do ciclo: 2 telas, com 18 metas "ande para a direita" alternadas com 17 "ande para a esquerda". Os motivos são mais articulados, mas ele conclui que a saída norte está fechada depois de já ter passado por ela |
 
@@ -121,7 +124,7 @@ O que cada ajuste mudou, sempre no mesmo trecho:
 - O gargalo medido é o supervisor: ele repete metas que o próprio estado diz que falharam e imagina coisas que não estão no mapa.
 - O ciclo mais frequente tem a mesma origem em todas as variações: depois do primeiro diálogo a personagem Impa acompanha Link, o mapa a mostra como um personagem ao lado dele, e o supervisor manda ir até ela.
 - Trocar o supervisor por um modelo quase nove vezes maior não tirou o agente do ciclo. Isso aponta para o que o supervisor recebe e para o formato da meta, mais do que para o tamanho do modelo: uma meta vale por oito inputs e não diz até onde andar, e o mapa em caracteres não diz por onde há caminho.
-- Dezenove variações de percepção, memória, conhecimento do jogo, formato da meta e modelo foram medidas no mesmo trecho. Nenhuma concluiu o trecho. A que foi mais longe usa o supervisor de 35B com destino, guia e contagem de textos repetidos: cinco telas.
+- Vinte e duas variações de percepção, memória, conhecimento do jogo, formato da meta e modelo foram medidas no mesmo trecho. Nenhuma concluiu o trecho. A que foi mais longe usa o supervisor de 35B com destino, guia e contagem de textos repetidos: cinco telas em uma rodada, quatro nas seguintes.
 - O que cabe melhorar sem tirar a decisão dos modelos é a percepção em texto, o prompt e o modelo do supervisor. Vários ajustes de prompt pioraram o resultado, então cada um precisa ser medido no mesmo trecho antes de ser adotado.
 - Cada input custa uma chamada ao Laya e, em média, uma chamada ao supervisor a cada cinco inputs. Um trecho de 600 inputs leva cerca de 7 minutos.
 
