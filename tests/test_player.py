@@ -27,3 +27,32 @@ def test_the_planner_gives_no_goal_when_the_supervisor_fails():
 
 def test_the_player_is_offered_only_buttons():
     assert set(player.BUTTONS) == {"up", "down", "left", "right", "a", "b"}
+
+
+def test_next_step_walks_around_a_wall_and_stops_next_to_a_solid_target():
+    lines = ["#.###",
+             "#...#",
+             "#@#N#",
+             "#####"]
+    assert player.next_step(lines, (1, 2), (1, 0)) == "up"
+    assert player.next_step(lines, (1, 1), (1, 0)) == "up"
+    assert player.next_step(lines, (1, 0), (1, 0)) == "here"
+    assert player.next_step(lines, (1, 2), (3, 2)) == "up"      # the character: go around to stand next to it
+    assert player.next_step(lines, (3, 1), (3, 2)) == "here"    # next to it
+    assert player.next_step(lines, (1, 2), (4, 3)) is None      # inside the wall: no way to stand next to it
+
+
+def test_next_step_is_consistent_along_a_path():
+    lines = ["##.##",
+             "#...#",
+             "#.#.#",
+             "#@..#"]
+    cell, seen = (1, 3), []
+    for _ in range(8):
+        way = player.next_step(lines, cell, (2, 0))
+        if way == "here":
+            break
+        seen.append(way)
+        dx, dy = player.puzzle.STEP[way]
+        cell = (cell[0] + dx, cell[1] + dy)
+    assert cell == (2, 0) and len(seen) == 4  # never steps back

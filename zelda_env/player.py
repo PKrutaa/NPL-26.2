@@ -217,6 +217,7 @@ class Planner:
         self.stats = {"calls": 0, "failed": 0, "seconds": 0.0}
         self.note = None  # what the supervisor last wrote to itself
         self.reach, self.steps = False, PLAN_EVERY  # with reach, the supervisor says how many inputs the goal lasts
+        self.walk_to, self.destination = False, None  # with walk_to, it names a cell of the map and what to do there
 
     def goal(self, state, memory=False):
         """The goal and the reason. With `memory`, the supervisor also writes a note to itself,
@@ -226,6 +227,13 @@ class Planner:
         if self.reach:
             schema["properties"]["steps"] = {"type": "integer", "minimum": 1, "maximum": PLAN_EVERY}
             schema["required"] = ["goal", "steps"]
+        if self.walk_to:
+            schema["properties"].update({
+                "column": {"type": "integer", "minimum": 0, "maximum": 14},
+                "row": {"type": "integer", "minimum": 0, "maximum": 10},
+                "then": {"type": "string", "enum": ["stop", "press A", "press B", "leave north", "leave south",
+                                                    "leave west", "leave east"]}})
+            schema["required"] = ["goal", "column", "row", "then"]
         if memory:
             schema["properties"]["note"] = {"type": "string"}
         user = "\n".join(f"{key}:\n{value}" if "\n" in str(value) else f"{key}: {value}"
@@ -238,13 +246,15 @@ class Planner:
                 "model": self.backend.model, "stream": False, "format": schema, "keep_alive": "30m",
                 "options": {"temperature": 0, "num_predict": 120},
                 "messages": [{"role": "system",
-                              "content": SYSTEM + (REACH_RULES if self.reach else "") + (MEMORY_RULES if memory else "")},
+                              "content": SYSTEM + (REACH_RULES if self.reach else "")
+                              + (DEST_RULES if self.walk_to else "") + (MEMORY_RULES if memory else "")},
                              {"role": "user", "content": user}],
             }, self.timeout)
             data = json.loads(reply.get("message", {}).get("content", ""))
             goal = " ".join(str(data["goal"]).split())[:120]
             reason = str(data.get("reason", ""))[:200]
             self.steps = max(1, min(PLAN_EVERY, int(data.get("steps", PLAN_EVERY)))) if self.reach else PLAN_EVERY
+            self.destination = ((int(data["column"]), int(data["row"])), str(data["then"])) if self.walk_to else None
             if memory and data.get("note"):
                 self.note = " ".join(str(data["note"]).split())[:200]
         except (OSError, ValueError, KeyError, TypeError):
@@ -252,6 +262,55 @@ class Planner:
             goal, reason = None, None
         self.stats["seconds"] += time.perf_counter() - started
         return goal, reason
+
+
+DEST_RULES = (
+    " Also answer where Link should go on this screen: 'column' and 'row' of a cell of the map, and 'then', what "
+    "to do on arriving: 'stop', 'press A', 'press B', or 'leave north', 'leave south', 'leave west', 'leave east' "
+    "to walk off the screen there. To leave a screen, choose a floor cell on that edge. To talk to a character or "
+    "push a thing, choose the cell of the character or the thing. The goal is then one sentence saying this."
+)
+SIDE_KEY = {"north": "up", "south": "down", "west": "left", "east": "right"}
+PHRASE_WALK = {"up": "Walk up", "down": "Walk down", "left": "Walk left", "right": "Walk right"}
+OPEN = ".s@"  # marks Link can walk over
+
+
+def next_step(lines, start, target):
+    """First step of a shortest walk from `start` to `target` on the character map.
+
+    Returns a direction, 'here' when Link is on the target (or next to a target that cannot be
+    walked on, such as a character), or None when there is no walk.
+    """
+    if not lines or not lines[0]:
+        return None
+    height, width = len(lines), len(lines[0])
+
+    def inside(cell):
+        return 0 <= cell[0] < width and 0 <= cell[1] < height
+
+    if not inside(target) or not inside(start):
+        return None
+    solid = lines[target[1]][target[0]] not in OPEN
+
+    def arrived(cell):
+        if solid:
+            return abs(cell[0] - target[0]) + abs(cell[1] - target[1]) == 1
+        return cell == target
+
+    if arrived(start):
+        return "here"
+    first, queue = {start: None}, deque([start])
+    while queue:
+        here = queue.popleft()
+        for name, (dx, dy) in puzzle.STEP.items():
+            cell = (here[0] + dx, here[1] + dy)
+            if not inside(cell) or cell in first or lines[cell[1]][cell[0]] not in OPEN:
+                continue
+            first[cell] = first[here] or name
+            if arrived(cell):
+                return first[cell]
+            queue.append(cell)
+    return None
 
 
 class Player:
@@ -275,6 +334,7 @@ class Player:
         self.memory, self.texts = False, False
         self.mark_followers, self.paths = False, False
         self.guide = False
+        self.leaving = False  # walking off the screen from the place the supervisor chose
         self.near, self.followers = {}, set()  # slot -> walks it stayed next to Link; slots that follow him
         self.done = [item[0] for item in objectives if item[3](pyboy)]
         self.inputs = {}
@@ -320,6 +380,7 @@ class Player:
             "map": screen_map(self.pyboy, self.followers if self.mark_followers else ()) or "no map (a scene or a menu)",
         }
         self.close_goal(seen.room)
+        self.leaving = False
         goal, reason = self.planner.goal(state, self.memory) if self.planner else (None, None)
         self.tally = {"room": seen.room, "events": {}}
         self.goal = goal or self.goal or "Explore: walk to a part of the screen you have not been to."
@@ -360,6 +421,8 @@ class Player:
             return
         stuck = self.still and self.still % STUCK_AFTER == 0
         lasts = self.planner.steps if self.planner else PLAN_EVERY
+        if self.planner and self.planner.walk_to and self.planner.destination:
+            lasts = 40  # a destination holds until Link gets there, is stuck or changes screen
         if self.goal is None or self.goal_age >= lasts or stuck:
             if stuck and self.goal and self.goal not in self.failed_goals:
                 self.failed_goals.append(self.goal)
@@ -370,6 +433,28 @@ class Player:
             choices = BUTTONS
         sides = around(self.pyboy)
         context = {"goal": self.goal}
+        aim = self.planner.destination if self.planner and self.planner.walk_to else None
+        if aim and seen.mode == "playing":
+            # The supervisor chose where to go. The way there is worked out on the character map
+            # and Laya is told one step at a time; it still picks the button.
+            (target, then), here = aim, (seen.x // 16, seen.y // 16)
+            way = next_step((screen_map(self.pyboy) or "").split("\n"), here, target)
+            if self.leaving:
+                # Link reached the place and is on his way off the screen: keep to that side
+                # until the screen changes, or until he is blocked and the supervisor is asked again.
+                way = "here"
+            if way is None:
+                self.failed_goals.append(f"{self.goal} (no way to column {target[0]}, row {target[1]})")
+                self.planner.destination, self.goal_age = None, 99
+            elif way != "here":
+                context["goal"] = f"{PHRASE_WALK[way]} toward the place the guide chose."
+            elif then.startswith("leave"):
+                self.leaving = True
+                context["goal"] = f"{PHRASE_WALK[SIDE_KEY[then.split()[1]]]} to leave the screen."
+            else:
+                if then.startswith("press"):
+                    context["goal"] = f"Press {then.split()[1]} now."
+                self.planner.destination, self.goal_age = None, 99  # done: ask again after this input
         if seen.mode == "playing" and sides:
             context["facing"] = seen.facing
             context["next to link"] = ", ".join(f"{side}: {what}" for side, what in sides.items())
@@ -408,6 +493,7 @@ class Player:
         self.write({
             "decision": self.steps, "objective": name, "room": seen.room, "xy": [seen.x, seen.y],
             "node": f"{seen.room}@{(seen.x or 0) // 16}:{(seen.y or 0) // 16}", "goal": self.goal,
+            "step_goal": context["goal"], "destination": aim,
             "options": list(choices), "choice": key, "origin": "laya", "outcome": event, "after_room": after.room,
             "confidence": (answer or {}).get("answer_confidence"), "survey_s": 0.0, "reached": reached,
             "health": [hearts[0], hearts[1]],
@@ -435,6 +521,9 @@ def main():
     parser.add_argument("--no-think", action="store_true",
                         help="Desliga a fase de raciocínio de modelos que têm uma (sem isso eles devolvem vazio)")
     parser.add_argument("--supervisor-timeout", type=float, default=30.0)
+    parser.add_argument("--walk-to", action="store_true",
+                        help="O supervisor escolhe uma casa do mapa e o que fazer lá; o caminho até ela é calculado "
+                             "no mapa e passado ao Laya um passo por vez")
     parser.add_argument("--guide", action="store_true",
                         help="Dá ao supervisor o texto de um guia sobre o objetivo atual")
     parser.add_argument("--followers", action="store_true",
@@ -490,6 +579,7 @@ def main():
             agent.guide = args.guide
             if planner:
                 planner.reach = args.reach
+                planner.walk_to = args.walk_to
             reason, started = "orçamento de inputs", time.perf_counter()
             guard = 0
             try:
