@@ -1,3 +1,4 @@
+import pytest
 from zelda_env import player
 
 
@@ -65,3 +66,13 @@ def test_side_of_names_the_direction_of_a_touching_cell():
     assert side_of((9, 2), (8, 2)) == "left"
     assert side_of((9, 2), (9, 2)) is None
     assert side_of((9, 2), (9, 5)) is None
+
+
+def test_read_answer_keeps_the_complete_fields_of_an_answer_cut_short():
+    from zelda_env.player import read_answer
+
+    cut = '{\n"goal": "Walk left to leave the screen.",\n"column": 0,\n"row": 3,\n"then": "leave west",\n"reason": "The guide say'
+    assert read_answer(cut) == {"goal": "Walk left to leave the screen.", "column": 0, "row": 3, "then": "leave west"}
+    assert read_answer('{"goal": "Press A now.", "reason": "ok"}') == {"goal": "Press A now.", "reason": "ok"}
+    with pytest.raises(ValueError):
+        read_answer('{"goal": "Walk le')

@@ -71,8 +71,12 @@ SYSTEM = (
     "When the state says there is no text on screen, pressing A reads nothing. "
     "A goal listed as having changed nothing must not be given again: choose another direction or button. "
     "Prefer walking toward a part of the map Link has not reached, or toward a character, when unsure. "
-    'Answer with JSON only: {"goal": "<instruction>", "reason": "<short reason>"}.'
 )
+ANSWER = ' Answer with JSON only: {"goal": "<instruction>", "reason": "<short reason>"}.'
+# With a place to go, the reason comes last: a model with its thinking turned off thinks inside
+# the reason, and an answer cut there still has every other field.
+ANSWER_DEST = (' Answer with JSON only, with the keys in this order: {"goal": "<instruction>", "column": <number>, '
+               '"row": <number>, "then": "<what to do there>", "reason": "<at most twenty words>"}.')
 
 
 _TEXTS = None
@@ -208,6 +212,19 @@ def around(pyboy):
     return result
 
 
+def read_answer(text):
+    """The supervisor's JSON answer. One cut short in the middle of a string still gives the
+    fields that were complete before the cut."""
+    try:
+        return json.loads(text)
+    except ValueError:
+        fields = {key: json.loads(value) for key, value in
+                  re.findall(r'"(\w+)"\s*:\s*("(?:[^"\\]|\\.)*"|-?\d+)\s*[,}]', text)}
+        if "goal" not in fields:
+            raise
+        return fields
+
+
 class Planner:
     """Asks the supervisor for the goal of the moment. Never raises."""
 
@@ -236,29 +253,35 @@ class Planner:
             schema["required"] = ["goal", "column", "row", "then"]
         if memory:
             schema["properties"]["note"] = {"type": "string"}
+        # The reason is written last, so an answer cut short loses only the reason.
+        schema["properties"]["reason"] = schema["properties"].pop("reason")
         user = "\n".join(f"{key}:\n{value}" if "\n" in str(value) else f"{key}: {value}"
                          for key, value in state.items())
-        started = time.perf_counter()
+        started, self.error, raw = time.perf_counter(), None, ""
         self.stats["calls"] += 1
         try:
             reply = self.backend._post("/api/chat", {
                 **({} if self.think is None else {"think": self.think}),
                 "model": self.backend.model, "stream": False, "format": schema, "keep_alive": "30m",
-                "options": {"temperature": 0, "num_predict": 120},
+                "options": {"temperature": 0, "num_predict": 400},
                 "messages": [{"role": "system",
                               "content": SYSTEM + (REACH_RULES if self.reach else "")
-                              + (DEST_RULES if self.walk_to else "") + (MEMORY_RULES if memory else "")},
+                              + (DEST_RULES if self.walk_to else "") + (MEMORY_RULES if memory else "")
+                              + (ANSWER_DEST if self.walk_to else ANSWER)},
                              {"role": "user", "content": user}],
             }, self.timeout)
-            data = json.loads(reply.get("message", {}).get("content", ""))
+            raw = reply.get("message", {}).get("content", "")
+            data = read_answer(raw)
             goal = " ".join(str(data["goal"]).split())[:120]
             reason = str(data.get("reason", ""))[:200]
             self.steps = max(1, min(PLAN_EVERY, int(data.get("steps", PLAN_EVERY)))) if self.reach else PLAN_EVERY
             self.destination = ((int(data["column"]), int(data["row"])), str(data["then"])) if self.walk_to else None
             if memory and data.get("note"):
                 self.note = " ".join(str(data["note"]).split())[:200]
-        except (OSError, ValueError, KeyError, TypeError):
+        except (OSError, ValueError, KeyError, TypeError) as error:
             self.stats["failed"] += 1
+            # Goes to the trace with the goal, with the answer as it came.
+            self.error = f"{type(error).__name__}: {error}"[:200] + f" | answer: {raw[:160]!r} ... {raw[-160:]!r}"
             goal, reason = None, None
         self.stats["seconds"] += time.perf_counter() - started
         return goal, reason
@@ -398,7 +421,8 @@ class Player:
         self.goal = goal or self.goal or "Explore: walk to a part of the screen you have not been to."
         self.reason, self.goal_age = reason, 0
         self.write({"event": "goal", "step": self.steps, "room": seen.room, "goal": self.goal, "reason": reason,
-                    "from_supervisor": bool(goal)})
+                    "from_supervisor": bool(goal),
+                    **({"error": self.planner.error} if self.planner and self.planner.error else {})})
 
     def close_goal(self, room):
         """Write down what the goal that just ended did, for the journal."""
@@ -464,7 +488,14 @@ class Player:
                 # Link reached the place and is on his way off the screen: keep to that side
                 # until the screen changes, or until he is blocked and the supervisor is asked again.
                 way = "here"
-            if way is None:
+            edges = open_edges(self.pyboy)
+            if then.startswith("leave") and not self.leaving and f"{then.split()[1]} (" not in edges:
+                # The side it named is closed on this screen. It is told so and asked again.
+                note = f"{self.goal} (the screen cannot be left to the {then.split()[1]}; it can be left to: {edges})"
+                if note not in self.failed_goals:
+                    self.failed_goals.append(note)
+                self.planner.destination, self.goal_age = None, 99
+            elif way is None:
                 self.failed_goals.append(f"{self.goal} (no way to column {target[0]}, row {target[1]})")
                 self.planner.destination, self.goal_age = None, 99
             elif way != "here":
@@ -503,7 +534,10 @@ class Player:
         if self.tally:
             self.tally["events"][event] = self.tally["events"].get(event, 0) + 1
         if after.room != seen.room and seen.room and after.room:
-            self.goal_age = PLAN_EVERY  # a new screen needs a new goal
+            self.goal_age = 99  # a new screen needs a new goal, and a place chosen on the old one is gone
+            self.leaving = False
+            if self.planner:
+                self.planner.destination = None
             self.failed_goals.clear()
             self.visits[seen.room] = self.visits.get(seen.room, 0) + 1
             side = {"up": "north", "down": "south", "left": "west", "right": "east"}.get(key, "door or stairs")

@@ -115,6 +115,7 @@ O que cada ajuste mudou, sempre no mesmo trecho:
 | Com `--walk-to`, Link vira para o destino antes de apertar o botão, `qwen3.6:35b-a3b` com guia e `--repeats` | Não melhorou: 4 telas. O ciclo da quinta tela sumiu e apareceu outro: o supervisor escolhe como destino a personagem que acompanha Link, ela troca de lado a cada passo, e ele alterna "vire para cima" e "vire para baixo" por cerca de 540 inputs |
 | O mesmo, somando `--followers` | Não melhorou: 4 telas, 83 trocas entre `00:6a` e `00:5a`. Na quarta tela ele tenta sair pelo norte, que está fechado, em vez de ir para o oeste como o guia diz |
 | O mesmo, `gemma3:4b` com `--walk-to --repeats` | Igual: "aperte A" na casa ao lado 588 vezes, na primeira tela |
+| Correções do `--walk-to`: o destino é descartado ao trocar de tela, a saída por um lado fechado é recusada e a resposta do supervisor pede o motivo por último, `qwen3.6:35b-a3b` com guia, `--repeats` e `--followers` | As consultas que falhavam sumiram: de 43 em 134 para 0 em 260. Antes o modelo se estendia no motivo, a resposta era cortada antes da casa de destino e o agente seguia com a meta antiga. O resultado não mudou: 4 telas. Na quarta tela ele alterna "vá até o personagem da linha 1" e "da linha 2" por 421 inputs, atrás da personagem que acompanha Link |
 | Supervisor `qwen2.5:7b` | Pior: em 150 inputs Link não saiu da primeira tela |
 | Supervisor `qwen3.6:35b-a3b`, sem a fase de raciocínio (`--no-think`), 300 inputs | Não saiu do ciclo: 2 telas, com 18 metas "ande para a direita" alternadas com 17 "ande para a esquerda". Os motivos são mais articulados, mas ele conclui que a saída norte está fechada depois de já ter passado por ela |
 
@@ -124,7 +125,7 @@ O que cada ajuste mudou, sempre no mesmo trecho:
 - O gargalo medido é o supervisor: ele repete metas que o próprio estado diz que falharam e imagina coisas que não estão no mapa.
 - O ciclo mais frequente tem a mesma origem em todas as variações: depois do primeiro diálogo a personagem Impa acompanha Link, o mapa a mostra como um personagem ao lado dele, e o supervisor manda ir até ela.
 - Trocar o supervisor por um modelo quase nove vezes maior não tirou o agente do ciclo. Isso aponta para o que o supervisor recebe e para o formato da meta, mais do que para o tamanho do modelo: uma meta vale por oito inputs e não diz até onde andar, e o mapa em caracteres não diz por onde há caminho.
-- Vinte e duas variações de percepção, memória, conhecimento do jogo, formato da meta e modelo foram medidas no mesmo trecho. Nenhuma concluiu o trecho. A que foi mais longe usa o supervisor de 35B com destino, guia e contagem de textos repetidos: cinco telas em uma rodada, quatro nas seguintes.
+- Vinte e três variações de percepção, memória, conhecimento do jogo, formato da meta e modelo foram medidas no mesmo trecho. Nenhuma concluiu o trecho. A que foi mais longe usa o supervisor de 35B com destino, guia e contagem de textos repetidos: cinco telas em uma rodada, quatro nas seguintes.
 - O que cabe melhorar sem tirar a decisão dos modelos é a percepção em texto, o prompt e o modelo do supervisor. Vários ajustes de prompt pioraram o resultado, então cada um precisa ser medido no mesmo trecho antes de ser adotado.
 - Cada input custa uma chamada ao Laya e, em média, uma chamada ao supervisor a cada cinco inputs. Um trecho de 600 inputs leva cerca de 7 minutos.
 
@@ -138,5 +139,7 @@ python -m zelda_env.segments run espada --decisions 600
 python -m zelda_env.segments run espada --mode options       # o mesmo trecho na linha de base
 python scripts/demo_video.py --out output/demo/laya.mp4 --play "Do início do jogo" output/inicio.state 280
 ```
+
+Quando uma consulta ao supervisor falha, a linha da meta traz o erro e a resposta como chegou.
 
 O rastro em `trace.jsonl` tem uma linha por input, com a meta em vigor, o botão escolhido, a confiança do Laya e o resultado, e uma linha por meta nova, com o motivo que o supervisor deu.
