@@ -79,7 +79,7 @@ Trecho `espada`, do início do jogo até Link receber a espada. Orçamento de 60
 
 O agente sobe três telas, que é o caminho certo, e passa pelo primeiro diálogo apertando A. Depois fica indo e voltando entre as telas `00:6a` e `00:5a`. A personagem Impa passa a acompanhar Link depois do diálogo; o supervisor vê um personagem ao lado dele e manda ir até o personagem, que anda junto.
 
-Nesse trecho o Laya segue a meta com 92% a 98% de confiança. O erro está na meta.
+Nesse trecho o Laya segue a meta com 92% a 98% de confiança. O erro está na meta. Na rodada com o supervisor de 35B, o botão que o Laya apertou foi o que a meta pedia em 300 de 300 inputs.
 
 O que cada ajuste mudou, sempre no mesmo trecho:
 
@@ -95,11 +95,13 @@ O que cada ajuste mudou, sempre no mesmo trecho:
 | Memória do supervisor: diário das últimas metas, o que foi tentado em cada tela e uma nota que ele escreve para si mesmo (`--memory`) | Não melhorou: as mesmas 4 telas, 332 inputs contra a parede e mais idas e voltas (107 trocas de tela). Ficou como opção |
 | Falas do jogo no texto do supervisor (`--texts`) | Piorou: 68 metas iguais seguidas e maior trecho repetitivo de 544. Ficou como opção |
 | Supervisor `qwen2.5:7b` | Pior: em 150 inputs Link não saiu da primeira tela |
+| Supervisor `qwen3.6:35b-a3b`, sem a fase de raciocínio (`--no-think`), 300 inputs | Não saiu do ciclo: 2 telas, com 18 metas "ande para a direita" alternadas com 17 "ande para a esquerda". Os motivos são mais articulados, mas ele conclui que a saída norte está fechada depois de já ter passado por ela |
 
 ## Consequências
 
 - O agente ainda entra em ciclos e não conclui o primeiro trecho do jogo. Esse é o comportamento medido dos dois modelos.
 - O gargalo medido é o supervisor: ele repete metas que o próprio estado diz que falharam e imagina coisas que não estão no mapa.
+- Trocar o supervisor por um modelo quase nove vezes maior não tirou o agente do ciclo. Isso aponta para o que o supervisor recebe e para o formato da meta, mais do que para o tamanho do modelo: uma meta vale por oito inputs e não diz até onde andar, e o mapa em caracteres não diz por onde há caminho.
 - O que cabe melhorar sem tirar a decisão dos modelos é a percepção em texto, o prompt e o modelo do supervisor. Vários ajustes de prompt pioraram o resultado, então cada um precisa ser medido no mesmo trecho antes de ser adotado.
 - Cada input custa uma chamada ao Laya e, em média, uma chamada ao supervisor a cada cinco inputs. Um trecho de 600 inputs leva cerca de 7 minutos.
 
